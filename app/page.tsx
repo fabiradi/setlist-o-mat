@@ -423,6 +423,18 @@ export default function Home() {
     const duplicate: Setlist = { ...source, id: nextId, name: `${baseName} – Variante ${Math.max(variants, 1) + 1}`, ownerId: null, owner: friendlyName, state: "draft", rating: 0, ratingCount: 0, comments: 0, reviews: [], pieceIds: [...source.pieceIds] };
     setSetlists((current) => [...current, duplicate]); setBuilderId(nextId); flash("Variante als Entwurf angelegt");
   };
+  const deleteSetlist = async (setlist: Setlist) => {
+    const isOwnDraft = setlist.state === "draft" && (!session || setlist.ownerId === session.user.id);
+    if (!isOwnDraft || !window.confirm(`Den Entwurf „${setlist.name}“ wirklich löschen?`)) return;
+    if (supabase && session && typeof setlist.id === "string") {
+      const { data, error } = await supabase.from("setlists").delete().eq("id", setlist.id).eq("owner_id", session.user.id).eq("state", "draft").select("id").maybeSingle();
+      if (error || !data) { flash("Entwurf konnte nicht gelöscht werden"); return; }
+    }
+    setSetlists((current) => current.filter((item) => item.id !== setlist.id));
+    if (builderId === setlist.id) setBuilderId(null);
+    if (activeSetlistId === setlist.id) setActiveSetlistId(null);
+    flash("Entwurf gelöscht");
+  };
   const patchBuilder = (patch: Partial<Setlist>) => {
     if (!builderId) return;
     const current = setlists.find((item) => item.id === builderId);
@@ -566,12 +578,13 @@ export default function Home() {
         {visibleSetlists.length ? <div className="setlist-grid">{visibleSetlists.map((setlist) => {
           const metrics = getMetrics(setlist.pieceIds, catalogue);
           const ownSetlistRating = setlistRatings[String(setlist.id)];
+          const canDeleteDraft = setlist.state === "draft" && (!session || setlist.ownerId === session.user.id);
           return <article className={`setlist-card state-${setlist.state}`} key={setlist.id}>
             <div className="setlist-card-head"><div>{setlist.state === "draft" ? <Lock /> : setlist.state === "finalist" || setlist.state === "final" ? <Trophy /> : <ListMusic />}</div><span className={`status-pill ${setlist.state}`}>{setlist.state === "draft" ? "Privater Entwurf" : setlist.state === "finalist" ? "Finalrunde" : setlist.state === "final" ? "Finale Setlist" : "Veröffentlicht"}</span></div>
             <h2>{setlist.name}</h2><p>von {setlist.owner} · {setlist.pieceIds.length} Stücke</p><TimeSignal duration={metrics.duration} compact />
             <div className="setlist-piece-preview">{metrics.selected.slice(0, 4).map((piece, index) => <span key={piece.id}><b>{index + 1}</b>{piece.title}<small>{formatDuration(piece.durationSeconds)}</small></span>)}{metrics.selected.length > 4 && <em>+{metrics.selected.length - 4} weitere</em>}</div>
             <div className="genre-line">{metrics.genres.slice(0, 3).map((item) => <span className="genre-chip" key={item}>{item}</span>)}</div>
-            <div className="setlist-footer">{setlist.state === "draft" ? <button className="secondary-button" onClick={() => setBuilderId(setlist.id)}><Pencil /> Weiterbauen</button> : <button className="setlist-score score-button" onClick={() => setActiveSetlistId(setlist.id)}><Star fill={setlist.ratingCount ? "currentColor" : "none"} /><strong>{setlist.ratingCount ? setlist.rating.toFixed(1).replace(".", ",") : "–"}</strong><small>{ownSetlistRating ? `Du: ${ownSetlistRating.stars}/5 · Diskussion öffnen` : `${setlist.ratingCount}/${Math.max(members.length, 6)} bewertet`}</small></button>}<button className="text-button" onClick={() => duplicateSetlist(setlist)}><Copy /> Duplizieren</button></div>
+            <div className="setlist-footer">{setlist.state === "draft" ? <button className="secondary-button" onClick={() => setBuilderId(setlist.id)}><Pencil /> Weiterbauen</button> : <button className="setlist-score score-button" onClick={() => setActiveSetlistId(setlist.id)}><Star fill={setlist.ratingCount ? "currentColor" : "none"} /><strong>{setlist.ratingCount ? setlist.rating.toFixed(1).replace(".", ",") : "–"}</strong><small>{ownSetlistRating ? `Du: ${ownSetlistRating.stars}/5 · Diskussion öffnen` : `${setlist.ratingCount}/${Math.max(members.length, 6)} bewertet`}</small></button>}<button className="text-button" onClick={() => duplicateSetlist(setlist)}><Copy /> Duplizieren</button>{canDeleteDraft && <button className="text-button danger-button" onClick={() => void deleteSetlist(setlist)}><Trash2 /> Löschen</button>}</div>
             {isAdmin && setlist.state !== "draft" && <div className="admin-setlist-actions"><span>Admin-Auswahl</span>{setlist.state !== "finalist" && setlist.state !== "final" && <button onClick={() => markSetlist(setlist.id, "finalist")}><Trophy /> Finalrunde</button>}{setlist.state === "finalist" && <button onClick={() => markSetlist(setlist.id, "final")}><BadgeCheck /> Als final festlegen</button>}{(setlist.state === "finalist" || setlist.state === "final") && <button onClick={() => markSetlist(setlist.id, "published")}><X /> Zurücksetzen</button>}</div>}
           </article>;
         })}</div> : <div className="empty-setlists"><ListMusic /><strong>Hier ist noch nichts gelandet.</strong><span>{setlistFilter === "mine" ? "Lege eine neue Setlist an – sie bleibt bis zur Veröffentlichung privat." : "Sobald eine Setlist für diese Auswahl passt, erscheint sie hier."}</span></div>}
