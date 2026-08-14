@@ -22,7 +22,9 @@ type Piece = {
 type Rating = { stars: number | null; skipped: boolean; comment: string };
 type View = "home" | "pieces" | "setlists" | "admin";
 type SetlistState = "draft" | "published" | "finalist" | "final";
-type Setlist = { id: number | string; name: string; owner: string; pieceIds: number[]; state: SetlistState; rating: number; ratingCount: number; comments: number };
+type SetlistFilter = "all" | "finalists" | "mine";
+type SetlistReview = { userId: string; author: string; stars: number; comment: string };
+type Setlist = { id: number | string; name: string; ownerId: string | null; owner: string; pieceIds: number[]; state: SetlistState; rating: number; ratingCount: number; comments: number; reviews: SetlistReview[] };
 type SetlistRating = { stars: number; comment: string };
 type GroupRating = { average: number; count: number; comments: { author: string; text: string }[] };
 type Member = { id: string; displayName: string; isAdmin: boolean; lastSeenAt: string | null };
@@ -40,9 +42,9 @@ const initialRatings: Record<number, Rating> = {
   10: { stars: 3, skipped: false, comment: "Charmant, aber nicht mein Favorit." },
 };
 const initialSetlists: Setlist[] = [
-  { id: 1, name: "Tanzende Tuba", owner: "Demo-Mitglied 1", pieceIds: [1, 3, 5, 7, 9, 11], state: "finalist", rating: 4.4, ratingCount: 4, comments: 6 },
-  { id: 2, name: "Goldener Wirbelwind", owner: "Demo-Mitglied 2", pieceIds: [2, 4, 6, 8, 10, 12], state: "published", rating: 4.1, ratingCount: 3, comments: 3 },
-  { id: 3, name: "Mitternachtsfanfare", owner: "Demo-Mitglied 3", pieceIds: [1, 4, 7, 10, 12], state: "draft", rating: 0, ratingCount: 0, comments: 0 },
+  { id: 1, name: "Tanzende Tuba", ownerId: "demo-1", owner: "Demo-Mitglied 1", pieceIds: [1, 3, 5, 7, 9, 11], state: "finalist", rating: 4.5, ratingCount: 2, comments: 2, reviews: [{ userId: "demo-2", author: "Demo-Mitglied 2", stars: 5, comment: "Schöne Dramaturgie und ein starker Schluss." }, { userId: "demo-3", author: "Demo-Mitglied 3", stars: 4, comment: "Guter Mix, nur die Mitte könnte etwas ruhiger sein." }] },
+  { id: 2, name: "Goldener Wirbelwind", ownerId: "demo-2", owner: "Demo-Mitglied 2", pieceIds: [2, 4, 6, 8, 10, 12], state: "published", rating: 4, ratingCount: 1, comments: 1, reviews: [{ userId: "demo-1", author: "Demo-Mitglied 1", stars: 4, comment: "Passt zeitlich gut und deckt viele Genres ab." }] },
+  { id: 3, name: "Mitternachtsfanfare", ownerId: null, owner: "Demo", pieceIds: [1, 4, 7, 10, 12], state: "draft", rating: 0, ratingCount: 0, comments: 0, reviews: [] },
 ];
 const artNames = ["Funkelnder Auftakt", "Fliegende Fermate", "Samtener Paukenschlag", "Tanzendes Tenorhorn", "Goldene Generalpause", "Wilde Holzbläser"];
 
@@ -86,6 +88,7 @@ export default function Home() {
   const [activePieceId, setActivePieceId] = useState<number | null>(null);
   const [activeSetlistId, setActiveSetlistId] = useState<number | string | null>(null);
   const [setlistRatings, setSetlistRatings] = useState<Record<string, SetlistRating>>({});
+  const [setlistFilter, setSetlistFilter] = useState<SetlistFilter>("all");
   const [builderId, setBuilderId] = useState<number | string | null>(null);
   const [remotePieceIds, setRemotePieceIds] = useState<Record<number, string>>({});
   const [remotePieces, setRemotePieces] = useState<Piece[]>([]);
@@ -204,12 +207,19 @@ export default function Home() {
         return {
           id: setlist.id,
           name: setlist.name,
+          ownerId: setlist.owner_id,
           owner: profileNames.get(setlist.owner_id) ?? "Mitglied",
           pieceIds: orderedItems.flatMap((item) => { const localId = localByRemote.get(item.piece_id); return localId ? [localId] : []; }),
           state: setlist.state as SetlistState,
           rating: stars.length ? stars.reduce((sum, value) => sum + value, 0) / stars.length : 0,
           ratingCount: stars.length,
           comments: listRatings.filter((rating) => rating.comment?.trim()).length,
+          reviews: listRatings.map((rating) => ({
+            userId: rating.user_id,
+            author: profileNames.get(rating.user_id) ?? "Mitglied",
+            stars: rating.stars,
+            comment: rating.comment?.trim() ?? "",
+          })),
         };
       }));
       setSetlistRatings(Object.fromEntries(allSetlistRatings.filter((rating) => rating.user_id === session.user.id).map((rating) => [rating.setlist_id, { stars: rating.stars, comment: rating.comment ?? "" }])));
@@ -278,12 +288,12 @@ export default function Home() {
     if (supabase && session) {
       const { data, error } = await supabase.from("setlists").insert({ project_id: ACTIVE_PROJECT_ID, owner_id: session.user.id, name, state: "draft" }).select("id").single();
       if (error || !data) { flash("Entwurf konnte nicht angelegt werden"); return; }
-      const setlist: Setlist = { id: data.id, name, owner: friendlyName, pieceIds: [], state: "draft", rating: 0, ratingCount: 0, comments: 0 };
+      const setlist: Setlist = { id: data.id, name, ownerId: session.user.id, owner: friendlyName, pieceIds: [], state: "draft", rating: 0, ratingCount: 0, comments: 0, reviews: [] };
       setSetlists((current) => [...current, setlist]); setBuilderId(data.id); setView("setlists"); return;
     }
     const numericIds = setlists.map((item) => item.id).filter((id): id is number => typeof id === "number");
     const nextId = Math.max(...numericIds, 0) + 1;
-    const setlist: Setlist = { id: nextId, name, owner: friendlyName, pieceIds: [], state: "draft", rating: 0, ratingCount: 0, comments: 0 };
+    const setlist: Setlist = { id: nextId, name, ownerId: null, owner: friendlyName, pieceIds: [], state: "draft", rating: 0, ratingCount: 0, comments: 0, reviews: [] };
     setSetlists((current) => [...current, setlist]); setBuilderId(nextId); setView("setlists");
   };
   const duplicateSetlist = async (source: Setlist) => {
@@ -295,12 +305,12 @@ export default function Home() {
       if (error || !data) { flash("Variante konnte nicht angelegt werden"); return; }
       const items = source.pieceIds.flatMap((pieceId, index) => remotePieceIds[pieceId] ? [{ setlist_id: data.id, piece_id: remotePieceIds[pieceId], position: index + 1 }] : []);
       if (items.length) await supabase.from("setlist_items").insert(items);
-      const duplicate: Setlist = { ...source, id: data.id, name, owner: friendlyName, state: "draft", rating: 0, ratingCount: 0, comments: 0, pieceIds: [...source.pieceIds] };
+      const duplicate: Setlist = { ...source, id: data.id, name, ownerId: session.user.id, owner: friendlyName, state: "draft", rating: 0, ratingCount: 0, comments: 0, reviews: [], pieceIds: [...source.pieceIds] };
       setSetlists((current) => [...current, duplicate]); setBuilderId(data.id); flash("Variante als Entwurf angelegt"); return;
     }
     const numericIds = setlists.map((item) => item.id).filter((id): id is number => typeof id === "number");
     const nextId = Math.max(...numericIds, 0) + 1;
-    const duplicate: Setlist = { ...source, id: nextId, name: `${baseName} – Variante ${Math.max(variants, 1) + 1}`, owner: friendlyName, state: "draft", rating: 0, ratingCount: 0, comments: 0, pieceIds: [...source.pieceIds] };
+    const duplicate: Setlist = { ...source, id: nextId, name: `${baseName} – Variante ${Math.max(variants, 1) + 1}`, ownerId: null, owner: friendlyName, state: "draft", rating: 0, ratingCount: 0, comments: 0, reviews: [], pieceIds: [...source.pieceIds] };
     setSetlists((current) => [...current, duplicate]); setBuilderId(nextId); flash("Variante als Entwurf angelegt");
   };
   const patchBuilder = (patch: Partial<Setlist>) => {
@@ -327,11 +337,24 @@ export default function Home() {
     flash(state === "final" ? "Finale Setlist festgelegt" : state === "finalist" ? "Zur Finalrunde hinzugefügt" : "Markierung zurückgesetzt");
   };
   const saveSetlistRating = async (setlist: Setlist, rating: SetlistRating) => {
-    setSetlistRatings((current) => ({ ...current, [String(setlist.id)]: rating }));
     if (supabase && session && typeof setlist.id === "string") {
       const { error } = await supabase.from("setlist_ratings").upsert({ setlist_id: setlist.id, user_id: session.user.id, ...rating }, { onConflict: "setlist_id,user_id" });
       if (error) { flash("Setlist-Bewertung konnte nicht gespeichert werden"); return; }
     }
+    const userId = session?.user.id ?? "demo-current";
+    setSetlistRatings((current) => ({ ...current, [String(setlist.id)]: rating }));
+    setSetlists((current) => current.map((item) => {
+      if (item.id !== setlist.id) return item;
+      const reviews = [...item.reviews.filter((review) => review.userId !== userId), { userId, author: friendlyName, ...rating }];
+      const stars = reviews.map((review) => review.stars);
+      return {
+        ...item,
+        reviews,
+        rating: stars.reduce((sum, value) => sum + value, 0) / stars.length,
+        ratingCount: stars.length,
+        comments: reviews.filter((review) => review.comment.trim()).length,
+      };
+    }));
     flash("Setlist-Bewertung gespeichert");
   };
   const addAllowedEmail = async () => {
@@ -359,6 +382,8 @@ export default function Home() {
     flash("Nutzer gelöscht");
   };
   const publishedSetlists = setlists.filter((item) => item.state !== "draft");
+  const ownDraftCount = setlists.filter((item) => item.state === "draft" && (session ? item.ownerId === session.user.id : item.owner === friendlyName)).length;
+  const visibleSetlists = setlists.filter((item) => setlistFilter === "all" || (setlistFilter === "finalists" ? item.state === "finalist" || item.state === "final" : item.state === "draft" && (session ? item.ownerId === session.user.id : item.owner === friendlyName)));
   const finalist = setlists.find((item) => item.state === "final") ?? setlists.find((item) => item.state === "finalist");
   const navItems: { id: View; label: string; icon: typeof Music2 }[] = [
     { id: "home", label: "Übersicht", icon: BarChart3 }, { id: "pieces", label: "Stücke", icon: FileMusic }, { id: "setlists", label: "Setlists", icon: ListMusic }, ...(isAdmin ? [{ id: "admin" as View, label: "Admin", icon: Settings }] : []),
@@ -398,8 +423,23 @@ export default function Home() {
 
       {view === "setlists" && <div className="page setlists-page">
         <div className="page-heading"><div><span className="eyebrow"><ListMusic /> Setlists</span><h1>30 Minuten. Unendlich viele Möglichkeiten.</h1><p>Baue Varianten, veröffentliche deine Favoriten und finde gemeinsam das beste Programm.</p></div><button className="primary-button" onClick={createSetlist}><Plus /> Neue Setlist</button></div>
-        <div className="setlist-tabs"><button className="active">Alle <span>{setlists.length}</span></button><button>Finalrunde <span>{setlists.filter((item) => item.state === "finalist" || item.state === "final").length}</span></button><button>Meine Entwürfe <span>{setlists.filter((item) => item.state === "draft" && item.owner === friendlyName).length}</span></button></div>
-        <div className="setlist-grid">{setlists.map((setlist) => { const metrics = getMetrics(setlist.pieceIds, catalogue); const ownSetlistRating = setlistRatings[String(setlist.id)]; return <article className={`setlist-card state-${setlist.state}`} key={setlist.id}><div className="setlist-card-head"><div>{setlist.state === "draft" ? <Lock /> : setlist.state === "finalist" || setlist.state === "final" ? <Trophy /> : <ListMusic />}</div><span className={`status-pill ${setlist.state}`}>{setlist.state === "draft" ? "Privater Entwurf" : setlist.state === "finalist" ? "Finalrunde" : setlist.state === "final" ? "Finale Setlist" : "Veröffentlicht"}</span><button className="icon-button"><MoreHorizontal /></button></div><h2>{setlist.name}</h2><p>von {setlist.owner} · {setlist.pieceIds.length} Stücke</p><TimeSignal duration={metrics.duration} compact /><div className="setlist-piece-preview">{metrics.selected.slice(0, 4).map((piece, index) => <span key={piece.id}><b>{index + 1}</b>{piece.title}<small>{formatDuration(piece.durationSeconds)}</small></span>)}{metrics.selected.length > 4 && <em>+{metrics.selected.length - 4} weitere</em>}</div><div className="genre-line">{metrics.genres.slice(0, 3).map((item) => <span className="genre-chip" key={item}>{item}</span>)}</div><div className="setlist-footer">{setlist.state === "draft" ? <button className="secondary-button" onClick={() => setBuilderId(setlist.id)}><Pencil /> Weiterbauen</button> : <button className="setlist-score score-button" onClick={() => setActiveSetlistId(setlist.id)}><Star fill="currentColor" /><strong>{setlist.rating.toFixed(1).replace(".", ",")}</strong><small>{ownSetlistRating ? `Du: ${ownSetlistRating.stars}/5` : `${setlist.ratingCount}/6 bewertet`}</small></button>}<button className="text-button" onClick={() => duplicateSetlist(setlist)}><Copy /> Duplizieren</button></div>{isAdmin && setlist.state !== "draft" && <div className="admin-setlist-actions"><span>Admin-Auswahl</span>{setlist.state !== "finalist" && setlist.state !== "final" && <button onClick={() => markSetlist(setlist.id, "finalist")}><Trophy /> Finalrunde</button>}{setlist.state === "finalist" && <button onClick={() => markSetlist(setlist.id, "final")}><BadgeCheck /> Als final festlegen</button>}{(setlist.state === "finalist" || setlist.state === "final") && <button onClick={() => markSetlist(setlist.id, "published")}><X /> Zurücksetzen</button>}</div>}</article>; })}</div>
+        <div className="setlist-tabs" role="tablist" aria-label="Setlists filtern">
+          <button role="tab" aria-selected={setlistFilter === "all"} className={setlistFilter === "all" ? "active" : ""} onClick={() => setSetlistFilter("all")}>Alle <span>{setlists.length}</span></button>
+          <button role="tab" aria-selected={setlistFilter === "finalists"} className={setlistFilter === "finalists" ? "active" : ""} onClick={() => setSetlistFilter("finalists")}>Finalrunde <span>{setlists.filter((item) => item.state === "finalist" || item.state === "final").length}</span></button>
+          <button role="tab" aria-selected={setlistFilter === "mine"} className={setlistFilter === "mine" ? "active" : ""} onClick={() => setSetlistFilter("mine")}>Meine Entwürfe <span>{ownDraftCount}</span></button>
+        </div>
+        {visibleSetlists.length ? <div className="setlist-grid">{visibleSetlists.map((setlist) => {
+          const metrics = getMetrics(setlist.pieceIds, catalogue);
+          const ownSetlistRating = setlistRatings[String(setlist.id)];
+          return <article className={`setlist-card state-${setlist.state}`} key={setlist.id}>
+            <div className="setlist-card-head"><div>{setlist.state === "draft" ? <Lock /> : setlist.state === "finalist" || setlist.state === "final" ? <Trophy /> : <ListMusic />}</div><span className={`status-pill ${setlist.state}`}>{setlist.state === "draft" ? "Privater Entwurf" : setlist.state === "finalist" ? "Finalrunde" : setlist.state === "final" ? "Finale Setlist" : "Veröffentlicht"}</span></div>
+            <h2>{setlist.name}</h2><p>von {setlist.owner} · {setlist.pieceIds.length} Stücke</p><TimeSignal duration={metrics.duration} compact />
+            <div className="setlist-piece-preview">{metrics.selected.slice(0, 4).map((piece, index) => <span key={piece.id}><b>{index + 1}</b>{piece.title}<small>{formatDuration(piece.durationSeconds)}</small></span>)}{metrics.selected.length > 4 && <em>+{metrics.selected.length - 4} weitere</em>}</div>
+            <div className="genre-line">{metrics.genres.slice(0, 3).map((item) => <span className="genre-chip" key={item}>{item}</span>)}</div>
+            <div className="setlist-footer">{setlist.state === "draft" ? <button className="secondary-button" onClick={() => setBuilderId(setlist.id)}><Pencil /> Weiterbauen</button> : <button className="setlist-score score-button" onClick={() => setActiveSetlistId(setlist.id)}><Star fill={setlist.ratingCount ? "currentColor" : "none"} /><strong>{setlist.ratingCount ? setlist.rating.toFixed(1).replace(".", ",") : "–"}</strong><small>{ownSetlistRating ? `Du: ${ownSetlistRating.stars}/5 · Diskussion öffnen` : `${setlist.ratingCount}/${Math.max(members.length, 6)} bewertet`}</small></button>}<button className="text-button" onClick={() => duplicateSetlist(setlist)}><Copy /> Duplizieren</button></div>
+            {isAdmin && setlist.state !== "draft" && <div className="admin-setlist-actions"><span>Admin-Auswahl</span>{setlist.state !== "finalist" && setlist.state !== "final" && <button onClick={() => markSetlist(setlist.id, "finalist")}><Trophy /> Finalrunde</button>}{setlist.state === "finalist" && <button onClick={() => markSetlist(setlist.id, "final")}><BadgeCheck /> Als final festlegen</button>}{(setlist.state === "finalist" || setlist.state === "final") && <button onClick={() => markSetlist(setlist.id, "published")}><X /> Zurücksetzen</button>}</div>}
+          </article>;
+        })}</div> : <div className="empty-setlists"><ListMusic /><strong>Hier ist noch nichts gelandet.</strong><span>{setlistFilter === "mine" ? "Lege eine neue Setlist an – sie bleibt bis zur Veröffentlichung privat." : "Sobald eine Setlist für diese Auswahl passt, erscheint sie hier."}</span></div>}
       </div>}
 
       {view === "admin" && isAdmin && <div className="page admin-page">
@@ -411,7 +451,7 @@ export default function Home() {
 
     <nav className="bottom-nav" aria-label="Mobile Navigation">{navItems.map((item) => { const Icon = item.icon; return <button key={item.id} className={view === item.id ? "active" : ""} onClick={() => setView(item.id)}><Icon /><span>{item.label}</span>{item.id === "pieces" && <i>{catalogue.length - completed}</i>}</button>; })}</nav>
     {activePiece && <PieceDialog piece={activePiece} rating={ratings[activePiece.id]} groupRating={groupRatings[activePiece.id]} onClose={() => setActivePieceId(null)} onSave={(rating) => { saveRating(activePiece.id, rating); setActivePieceId(null); }} />}
-    {activeSetlist && <SetlistDialog catalogue={catalogue} setlist={activeSetlist} rating={setlistRatings[String(activeSetlist.id)]} onClose={() => setActiveSetlistId(null)} onSave={(rating) => { void saveSetlistRating(activeSetlist, rating); setActiveSetlistId(null); }} />}
+    {activeSetlist && <SetlistDialog catalogue={catalogue} setlist={activeSetlist} rating={setlistRatings[String(activeSetlist.id)]} currentUserId={session?.user.id ?? "demo-current"} onClose={() => setActiveSetlistId(null)} onSave={(rating) => { void saveSetlistRating(activeSetlist, rating); setActiveSetlistId(null); }} />}
     {builder && <BuilderDialog catalogue={catalogue} setlist={builder} onClose={() => setBuilderId(null)} onPatch={patchBuilder} onPublish={() => { patchBuilder({ state: "published" }); setBuilderId(null); flash("Setlist veröffentlicht – jetzt darf bewertet werden"); }} />}
     {adminPiece && <AdminPieceDialog piece={adminPiece} onClose={() => setAdminEditId(null)} onSave={(patch) => { setPieceOverrides((current) => ({ ...current, [adminPiece.id]: { ...current[adminPiece.id], ...patch } })); if (supabase && remotePieceIds[adminPiece.id]) void supabase.from("pieces").update({ genres: patch.genres, solo_status: patch.soloStatus, solos: patch.solos, duration_seconds: patch.durationSeconds, grade: patch.grade, price_cents: patch.priceCents, owned: patch.owned, source: patch.source, note: patch.note, updated_at: new Date().toISOString() }).eq("id", remotePieceIds[adminPiece.id]); setAdminEditId(null); flash("Metadaten gespeichert"); }} />}
     {showProfileDialog && supabase && session && <ProfileNameDialog initialName={suggestedProfileName} required={!profileNameConfirmedAt} email={email} onClose={() => setShowProfileDialog(false)} onSave={saveProfileName} />}
@@ -475,11 +515,12 @@ function BuilderDialog({ catalogue, setlist, onClose, onPatch, onPublish }: { ca
   return <div className="dialog-backdrop builder-backdrop"><section className="dialog builder-dialog" role="dialog" aria-modal="true" aria-label="Setlist bearbeiten"><header className="builder-header"><div><span className="dialog-kicker"><Lock /> Privater Entwurf</span><input value={setlist.name} onChange={(event) => onPatch({ name: event.target.value })} aria-label="Name der Setlist" /></div><button className="dialog-close" onClick={onClose}><X /></button></header><div className="builder-layout"><div className="builder-main"><div className="builder-section-title"><div><h3>Programmfolge</h3><span>{setlist.pieceIds.length} Stücke · per Pfeil sortieren</span></div><button className="text-button" onClick={() => { const alternatives = artNames.filter((name) => name !== setlist.name); onPatch({ name: alternatives[Math.floor(Math.random() * alternatives.length)] }); }}><Shuffle /> Kunstname würfeln</button></div><div className="builder-items">{metrics.selected.length === 0 && <div className="empty-builder"><ListMusic /><strong>Deine Bühne ist noch leer.</strong><span>Füge unten die ersten Stücke hinzu.</span></div>}{metrics.selected.map((piece, index) => <div className="builder-item" key={piece.id}><span className="order-number">{index + 1}</span><div className="builder-item-copy"><strong>{piece.title}</strong><span>{piece.composer}</span><div><em>{formatDuration(piece.durationSeconds)}</em><em>Grade {piece.grade}</em>{piece.genres[0] && <em>{piece.genres[0]}</em>}</div></div><div className="reorder"><button onClick={() => move(index, -1)} disabled={index === 0}><ArrowUp /></button><button onClick={() => move(index, 1)} disabled={index === metrics.selected.length - 1}><ArrowDown /></button></div><button className="remove-button" onClick={() => onPatch({ pieceIds: setlist.pieceIds.filter((id) => id !== piece.id) })}><Trash2 /></button></div>)}</div><div className="add-pieces"><h3>Stück hinzufügen</h3><label className="search-field"><Search /><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Titel suchen" /></label><div className="candidate-list">{candidates.map((piece) => <button key={piece.id} onClick={() => onPatch({ pieceIds: [...setlist.pieceIds, piece.id] })}><Plus /><div><strong>{piece.title}</strong><span>{piece.composer}</span></div><em>{formatDuration(piece.durationSeconds)}</em></button>)}</div></div></div><aside className="builder-summary"><span className="eyebrow">Live-Check</span><h3>Passt das Programm?</h3><TimeSignal duration={metrics.duration} /><div className="summary-stat"><span><Clock3 /> Dauer</span><strong>{formatDuration(metrics.duration)}</strong></div><div className="summary-stat"><span><BarChart3 /> Schwierigkeit</span><strong>{metrics.minGrade || "–"}–{metrics.maxGrade || "–"}</strong><small>Ø {metrics.avgGrade ? metrics.avgGrade.toFixed(1).replace(".", ",") : "–"}</small></div><div className="summary-stat"><span><Euro /> Noch zu kaufen</span><strong>{formatMoney(metrics.cost)}</strong></div><div className="summary-genres"><span>Genre-Mix</span><div>{metrics.genres.length ? metrics.genres.map((item) => <em key={item}>{item}</em>) : <small>Noch keine Stücke gewählt</small>}</div></div><button className="primary-button publish-button" disabled={setlist.pieceIds.length === 0} onClick={onPublish}><Sparkles /> Setlist veröffentlichen</button><small className="publish-note">Danach ist die Zusammenstellung gesperrt. Varianten bleiben jederzeit möglich.</small></aside></div></section></div>;
 }
 
-function SetlistDialog({ catalogue, setlist, rating, onClose, onSave }: { catalogue: Piece[]; setlist: Setlist; rating?: SetlistRating; onClose: () => void; onSave: (rating: SetlistRating) => void }) {
+function SetlistDialog({ catalogue, setlist, rating, currentUserId, onClose, onSave }: { catalogue: Piece[]; setlist: Setlist; rating?: SetlistRating; currentUserId: string; onClose: () => void; onSave: (rating: SetlistRating) => void }) {
   const [stars, setStars] = useState<number | null>(rating?.stars ?? null);
   const [comment, setComment] = useState(rating?.comment ?? "");
   const metrics = getMetrics(setlist.pieceIds, catalogue);
-  return <div className="dialog-backdrop" onMouseDown={(event) => event.target === event.currentTarget && onClose()}><section className="dialog setlist-dialog" role="dialog" aria-modal="true" aria-label={`${setlist.name} bewerten`}><button className="dialog-close" onClick={onClose}><X /></button><span className="dialog-kicker"><ListMusic /> Setlist bewerten</span><h2>{setlist.name}</h2><p className="dialog-subtitle">von {setlist.owner} · {setlist.pieceIds.length} Stücke</p><TimeSignal duration={metrics.duration} /><div className="setlist-dialog-metrics"><span><BarChart3 /> Grade {metrics.minGrade}–{metrics.maxGrade} · Ø {metrics.avgGrade.toFixed(1).replace(".", ",")}</span><span><Euro /> {formatMoney(metrics.cost)} zu kaufen</span></div><ol className="setlist-dialog-pieces">{metrics.selected.map((piece) => <li key={piece.id}><div><strong>{piece.title}</strong><span>{piece.composer}</span></div><small>{formatDuration(piece.durationSeconds)}</small></li>)}</ol><div className="rating-panel"><div className="rating-question"><span>Wie gut funktioniert diese Reihenfolge?</span><Stars value={stars} onChange={setStars} /></div><label><span>Dein Kommentar <small>optional und später änderbar</small></span><textarea value={comment} onChange={(event) => setComment(event.target.value)} placeholder="Dramaturgie, Dauer, Genre-Mix, Soli …" /></label></div><div className="dialog-actions"><button className="text-button" onClick={onClose}>Abbrechen</button><button className="primary-button" disabled={!stars} onClick={() => stars && onSave({ stars, comment })}><Check /> Bewertung speichern</button></div></section></div>;
+  const comments = setlist.reviews.filter((review) => review.comment);
+  return <div className="dialog-backdrop" onMouseDown={(event) => event.target === event.currentTarget && onClose()}><section className="dialog setlist-dialog" role="dialog" aria-modal="true" aria-label={`${setlist.name} bewerten`}><button className="dialog-close" onClick={onClose}><X /></button><span className="dialog-kicker"><ListMusic /> Setlist bewerten</span><h2>{setlist.name}</h2><p className="dialog-subtitle">von {setlist.owner} · {setlist.pieceIds.length} Stücke</p><TimeSignal duration={metrics.duration} /><div className="setlist-dialog-metrics"><span><BarChart3 /> Grade {metrics.minGrade}–{metrics.maxGrade} · Ø {metrics.avgGrade.toFixed(1).replace(".", ",")}</span><span><Euro /> {formatMoney(metrics.cost)} zu kaufen</span></div><div className="setlist-dialog-genres">{metrics.genres.map((genre) => <span className="genre-chip" key={genre}>{genre}</span>)}</div><ol className="setlist-dialog-pieces">{metrics.selected.map((piece, index) => <li key={piece.id}><b className="dialog-order">{index + 1}</b><div><strong>{piece.title}</strong><span>{piece.composer}</span>{piece.soloStatus === "available" && <span className="dialog-solo"><UserRound /> Soli: {piece.solos || "Instrumente noch offen"}</span>}{piece.soloStatus === "unknown" && <span className="dialog-solo unknown"><CircleHelp /> Soli noch nicht erfasst</span>}</div><small>{formatDuration(piece.durationSeconds)}</small></li>)}</ol><section className="setlist-discussion" aria-label="Gruppenbewertung"><div className="discussion-summary"><div><Users /><span>Gruppe · {setlist.ratingCount} {setlist.ratingCount === 1 ? "Bewertung" : "Bewertungen"}</span></div><strong>{setlist.ratingCount ? `Ø ${setlist.rating.toFixed(1).replace(".", ",")}` : "Noch keine Gruppenwertung"}</strong>{setlist.ratingCount > 0 && <Stars value={Math.round(setlist.rating)} small />}</div>{comments.length ? <div className="discussion-comments">{comments.map((review) => <article key={review.userId}><header><strong>{review.userId === currentUserId ? "Du" : review.author}</strong><span><Star fill="currentColor" /> {review.stars}/5</span></header><p>{review.comment}</p></article>)}</div> : <p className="discussion-empty">Noch keine Kommentare – du kannst die Diskussion eröffnen.</p>}</section><div className="rating-panel"><div className="rating-question"><span>Wie gut funktioniert diese Reihenfolge?</span><Stars value={stars} onChange={setStars} /></div><label><span>Dein Kommentar <small>optional und später änderbar</small></span><textarea value={comment} onChange={(event) => setComment(event.target.value)} placeholder="Dramaturgie, Dauer, Genre-Mix, Soli …" /></label></div><div className="dialog-actions"><button className="text-button" onClick={onClose}>Abbrechen</button><button className="primary-button" disabled={!stars} onClick={() => stars && onSave({ stars, comment })}><Check /> Bewertung speichern</button></div></section></div>;
 }
 
 function AdminPieceDialog({ piece, onClose, onSave }: { piece: Piece; onClose: () => void; onSave: (patch: AdminPiecePatch) => void }) {
