@@ -202,15 +202,35 @@ as $$
   )
 $$;
 
+-- Keep the piece-ratings SELECT policy from querying its own RLS-protected
+-- table directly, which would cause infinite policy recursion.
+create or replace function private.has_own_piece_rating(requested_piece_id uuid)
+returns boolean
+language sql
+stable
+security definer
+set search_path = ''
+as $$
+  select (select auth.uid()) is not null
+    and exists (
+      select 1
+      from public.piece_ratings own
+      where own.piece_id = requested_piece_id
+        and own.user_id = (select auth.uid())
+    )
+$$;
+
 revoke all on function private.is_app_admin() from public;
 revoke all on function private.is_project_member(uuid) from public;
 revoke all on function private.is_project_admin(uuid) from public;
 revoke all on function private.can_view_setlist(uuid) from public;
+revoke all on function private.has_own_piece_rating(uuid) from public;
 grant usage on schema private to authenticated;
 grant execute on function private.is_app_admin() to authenticated;
 grant execute on function private.is_project_member(uuid) to authenticated;
 grant execute on function private.is_project_admin(uuid) to authenticated;
 grant execute on function private.can_view_setlist(uuid) to authenticated;
+grant execute on function private.has_own_piece_rating(uuid) to authenticated;
 
 create or replace function private.before_user_created(event jsonb)
 returns jsonb
@@ -371,10 +391,7 @@ using (
   or private.is_app_admin()
   or (
     private.is_project_member((select p.project_id from public.pieces p where p.id = piece_ratings.piece_id))
-    and exists (
-      select 1 from public.piece_ratings own
-      where own.piece_id = piece_ratings.piece_id and own.user_id = (select auth.uid())
-    )
+    and private.has_own_piece_rating(piece_ratings.piece_id)
   )
 );
 
