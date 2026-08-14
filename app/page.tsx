@@ -48,6 +48,14 @@ const artNames = ["Funkelnder Auftakt", "Fliegende Fermate", "Samtener Paukensch
 
 function formatDuration(seconds: number) { return `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, "0")}`; }
 function formatMoney(cents: number) { return new Intl.NumberFormat("de-DE", { style: "currency", currency: "EUR", minimumFractionDigits: cents % 100 === 0 ? 0 : 2 }).format(cents / 100); }
+function getSuggestedProfileName(displayName: string | null, email: string) {
+  const localPart = email.split("@")[0] ?? "";
+  const currentName = displayName?.trim() ?? "";
+  const candidate = currentName && currentName.toLocaleLowerCase("de") !== localPart.toLocaleLowerCase("de")
+    ? currentName
+    : localPart.split(/[._]+/)[0];
+  return candidate ? candidate.charAt(0).toLocaleUpperCase("de") + candidate.slice(1) : "";
+}
 function getMetrics(pieceIds: number[], catalogue: Piece[] = pieces) {
   const selected = pieceIds.map((id) => catalogue.find((piece) => piece.id === id)).filter(Boolean) as Piece[];
   const duration = selected.reduce((sum, piece) => sum + piece.durationSeconds, 0);
@@ -86,6 +94,8 @@ export default function Home() {
   const [members, setMembers] = useState<Member[]>([]);
   const [allowedEmails, setAllowedEmails] = useState<AllowedEmail[]>([]);
   const [profileDisplayName, setProfileDisplayName] = useState<string | null>(null);
+  const [profileNameConfirmedAt, setProfileNameConfirmedAt] = useState<string | null | undefined>(undefined);
+  const [showProfileDialog, setShowProfileDialog] = useState(false);
   const [search, setSearch] = useState("");
   const [genre, setGenre] = useState("Alle Genres");
   const [onlyOpen, setOnlyOpen] = useState(false);
@@ -111,9 +121,14 @@ export default function Home() {
     const loadProjectData = async () => {
       void supabase.from("profiles").update({ last_seen_at: new Date().toISOString(), updated_at: new Date().toISOString() }).eq("id", session.user.id);
       const { data: currentProfile } = await supabase
-        .from("profiles").select("is_app_admin, display_name").eq("id", session.user.id).single();
-      if (active) setIsAdmin(Boolean(currentProfile?.is_app_admin));
-      if (active) setProfileDisplayName(currentProfile?.display_name ?? null);
+        .from("profiles").select("is_app_admin, display_name, name_confirmed_at").eq("id", session.user.id).single();
+      if (active) {
+        setIsAdmin(Boolean(currentProfile?.is_app_admin));
+        setProfileDisplayName(currentProfile?.display_name ?? null);
+        const confirmedAt = currentProfile?.name_confirmed_at ?? null;
+        setProfileNameConfirmedAt(confirmedAt);
+        setShowProfileDialog(!confirmedAt);
+      }
       const { data: dbPieces, error: piecesError } = await supabase
         .from("pieces").select("*").eq("project_id", ACTIVE_PROJECT_ID).eq("archived", false);
       if (piecesError || !dbPieces) { if (active) setToast("Supabase-Daten konnten nicht geladen werden"); return; }
@@ -215,6 +230,7 @@ export default function Home() {
   const email = session?.user.email?.toLocaleLowerCase("de") ?? "";
   const displayName = profileDisplayName || session?.user.user_metadata?.display_name || (email ? email.split("@")[0].split(".")[0] : "Demo");
   const friendlyName = String(displayName).charAt(0).toLocaleUpperCase("de") + String(displayName).slice(1);
+  const suggestedProfileName = getSuggestedProfileName(profileDisplayName, email);
 
   const filteredPieces = useMemo(() => {
     const query = search.trim().toLocaleLowerCase("de");
@@ -222,6 +238,25 @@ export default function Home() {
   }, [catalogue, genre, onlyOpen, ratings, search]);
 
   const flash = (message: string) => { setToast(message); window.setTimeout(() => setToast(null), 2400); };
+  const saveProfileName = async (name: string): Promise<string | null> => {
+    if (!supabase || !session) return "Dein Profil ist gerade nicht erreichbar.";
+    const normalizedName = name.trim().replace(/\s+/g, " ");
+    if (normalizedName.length < 2) return "Bitte gib mindestens zwei Zeichen ein.";
+    if (normalizedName.length > 80) return "Der Name darf höchstens 80 Zeichen lang sein.";
+    const confirmedAt = new Date().toISOString();
+    const { error } = await supabase.from("profiles").update({
+      display_name: normalizedName,
+      name_confirmed_at: confirmedAt,
+      updated_at: confirmedAt,
+    }).eq("id", session.user.id);
+    if (error) return "Der Name konnte nicht gespeichert werden. Bitte versuche es erneut.";
+    setProfileDisplayName(normalizedName);
+    setProfileNameConfirmedAt(confirmedAt);
+    setShowProfileDialog(false);
+    setMembers((current) => current.map((member) => member.id === session.user.id ? { ...member, displayName: normalizedName } : member));
+    flash(`Willkommen, ${normalizedName}!`);
+    return null;
+  };
   const saveRating = async (pieceId: number, rating: Rating) => {
     setRatings((current) => ({ ...current, [pieceId]: rating }));
     if (supabase && session && remotePieceIds[pieceId]) {
@@ -337,11 +372,11 @@ export default function Home() {
       <div className="brand-block"><AppMark /><div><strong>Setlist-o-Mat</strong><span>Gemeinsam. Klingt besser.</span></div></div>
       <nav aria-label="Hauptnavigation">{navItems.map((item) => { const Icon = item.icon; return <button key={item.id} className={view === item.id ? "active" : ""} onClick={() => setView(item.id)}><Icon />{item.label}{item.id === "pieces" && <span className="nav-count">{catalogue.length - completed}</span>}</button>; })}</nav>
       <div className="side-project"><span>Aktives Projekt</span><button><span><Music2 /> Jahreskonzert 2027</span><ChevronDown /></button></div>
-      <div className="side-user"><div className="avatar">{friendlyName.slice(0, 2).toLocaleUpperCase("de")}</div><div><strong>{friendlyName}</strong><span>{isAdmin ? "Administrator" : "Mitglied"}</span></div><button className="icon-button" aria-label="Abmelden" onClick={() => supabase?.auth.signOut()}><MoreHorizontal /></button></div>
+      <div className="side-user"><div className="avatar">{friendlyName.slice(0, 2).toLocaleUpperCase("de")}</div><button className="profile-trigger" onClick={() => setShowProfileDialog(true)} aria-label="Profilnamen ändern"><strong>{friendlyName}</strong><span>{isAdmin ? "Administrator" : "Mitglied"}</span></button><button className="icon-button" aria-label="Abmelden" onClick={() => supabase?.auth.signOut()}><MoreHorizontal /></button></div>
     </aside>
 
     <section className="main-stage">
-      <header className="mobile-header"><div className="mobile-brand"><AppMark /><strong>Setlist-o-Mat</strong></div><button className="icon-button" aria-label={supabase ? "Abmelden" : "Menü"} onClick={() => supabase?.auth.signOut()}><Menu /></button></header>
+      <header className="mobile-header"><div className="mobile-brand"><AppMark /><strong>Setlist-o-Mat</strong></div><div className="mobile-header-actions"><button className="icon-button" aria-label="Profilnamen ändern" onClick={() => setShowProfileDialog(true)}><UserRound /></button><button className="icon-button" aria-label="Abmelden" onClick={() => supabase?.auth.signOut()}><Menu /></button></div></header>
 
       {view === "home" && <div className="page dashboard-page">
         <div className="page-heading home-heading"><div><span className="eyebrow"><Sparkles /> Jahreskonzert 2027</span><h1>Hallo {friendlyName}, was klingt gut?</h1><p>Noch {catalogue.length - completed} Stücke warten auf deine Ohren. Danach darfst du bei den anderen spicken.</p></div><button className="primary-button" onClick={() => setView("pieces")}><Headphones /> Weiter bewerten</button></div>
@@ -379,6 +414,7 @@ export default function Home() {
     {activeSetlist && <SetlistDialog catalogue={catalogue} setlist={activeSetlist} rating={setlistRatings[String(activeSetlist.id)]} onClose={() => setActiveSetlistId(null)} onSave={(rating) => { void saveSetlistRating(activeSetlist, rating); setActiveSetlistId(null); }} />}
     {builder && <BuilderDialog catalogue={catalogue} setlist={builder} onClose={() => setBuilderId(null)} onPatch={patchBuilder} onPublish={() => { patchBuilder({ state: "published" }); setBuilderId(null); flash("Setlist veröffentlicht – jetzt darf bewertet werden"); }} />}
     {adminPiece && <AdminPieceDialog piece={adminPiece} onClose={() => setAdminEditId(null)} onSave={(patch) => { setPieceOverrides((current) => ({ ...current, [adminPiece.id]: { ...current[adminPiece.id], ...patch } })); if (supabase && remotePieceIds[adminPiece.id]) void supabase.from("pieces").update({ genres: patch.genres, solo_status: patch.soloStatus, solos: patch.solos, duration_seconds: patch.durationSeconds, grade: patch.grade, price_cents: patch.priceCents, owned: patch.owned, source: patch.source, note: patch.note, updated_at: new Date().toISOString() }).eq("id", remotePieceIds[adminPiece.id]); setAdminEditId(null); flash("Metadaten gespeichert"); }} />}
+    {showProfileDialog && supabase && session && <ProfileNameDialog initialName={suggestedProfileName} required={!profileNameConfirmedAt} email={email} onClose={() => setShowProfileDialog(false)} onSave={saveProfileName} />}
     {toast && <div className="toast"><Check /> {toast}</div>}
   </main>;
 }
@@ -408,6 +444,20 @@ function LoginScreen({ supabase }: { supabase: SupabaseClient }) {
   };
 
   return <main className="auth-page"><section className="auth-card"><div className="auth-brand"><AppMark /><div><strong>Setlist-o-Mat</strong><span>Gemeinsam. Klingt besser.</span></div></div><div className="auth-art" aria-hidden="true"><Music2 /><span>♪</span><i>✦</i></div><div className="auth-copy"><span className="eyebrow"><Sparkles /> Jahreskonzert 2027</span><h1>{sent ? "Schau kurz ins Postfach." : "Reinhören. Bewerten. Programm bauen."}</h1><p>{sent ? `Wir haben einen Anmeldelink an ${email} geschickt. Öffne ihn direkt – falls die Mail stattdessen einen sechsstelligen Code enthält, kannst du ihn hier eingeben.` : "Ohne Passwort: E-Mail eingeben und den Anmeldelink oder Code aus der Mail verwenden."}</p>{!sent ? <form onSubmit={(event) => { event.preventDefault(); requestCode(); }}><label><span>E-Mail-Adresse</span><input autoComplete="email" inputMode="email" type="email" required value={email} onChange={(event) => setEmail(event.target.value)} placeholder="name@beispiel.de" /></label><button className="primary-button" disabled={busy || !email.trim()}>{busy ? "Wird gesendet …" : "Anmeldemail senden"}<ChevronRight /></button></form> : <form onSubmit={(event) => { event.preventDefault(); verifyCode(); }}><label><span>Sechsstelliger Code <small>falls in der Mail enthalten</small></span><input autoComplete="one-time-code" inputMode="numeric" pattern="[0-9]{6}" maxLength={6} value={code} onChange={(event) => setCode(event.target.value.replace(/\D/g, ""))} placeholder="123456" /></label><button className="primary-button" disabled={busy || code.length !== 6}>{busy ? "Wird geprüft …" : "Code verwenden"}<ChevronRight /></button><button type="button" className="text-button" onClick={() => { setSent(false); setCode(""); setMessage(null); }}>Andere E-Mail verwenden</button></form>}{message && <div className="auth-message"><CircleHelp />{message}</div>}<div className="auth-hint"><BadgeCheck /><span><strong>@musikverein-verl.de</strong> ist automatisch freigeschaltet. Andere Adressen müssen auf der Freigabeliste stehen – im Zweifel kurz per WhatsApp melden.</span></div></div></section></main>;
+}
+
+function ProfileNameDialog({ initialName, required, email, onClose, onSave }: { initialName: string; required: boolean; email: string; onClose: () => void; onSave: (name: string) => Promise<string | null> }) {
+  const [name, setName] = useState(initialName);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const normalizedName = name.trim().replace(/\s+/g, " ");
+  const save = async () => {
+    setBusy(true); setError(null);
+    const saveError = await onSave(normalizedName);
+    setBusy(false);
+    if (saveError) setError(saveError);
+  };
+  return <div className="dialog-backdrop profile-backdrop" onMouseDown={(event) => !required && event.target === event.currentTarget && onClose()}><section className="dialog profile-dialog" role="dialog" aria-modal="true" aria-label={required ? "Anzeigenamen festlegen" : "Anzeigenamen ändern"}>{!required && <button className="dialog-close" onClick={onClose} aria-label="Schließen"><X /></button>}<div className="profile-icon"><UserRound /></div><span className="dialog-kicker"><Sparkles /> {required ? "Fast geschafft" : "Dein Profil"}</span><h2>{required ? "Wie dürfen wir dich nennen?" : "Wie möchtest du heißen?"}</h2><p className="profile-intro">Dieser Name erscheint bei deinen Bewertungen, Kommentaren und Setlists. Ein Vorname reicht vollkommen.</p><form className="profile-form" onSubmit={(event) => { event.preventDefault(); void save(); }}><label><span>Anzeigename</span><input autoFocus autoComplete="name" maxLength={80} required value={name} onChange={(event) => setName(event.target.value)} placeholder="Zum Beispiel Fabian" /></label><small className="profile-email">Angemeldet als {email}</small>{error && <div className="profile-error"><CircleHelp /> {error}</div>}<div className="dialog-actions">{!required && <button type="button" className="text-button" onClick={onClose}>Abbrechen</button>}<button className="primary-button" disabled={busy || normalizedName.length < 2}>{busy ? "Wird gespeichert …" : "Name speichern"}<Check /></button></div></form></section></div>;
 }
 
 function PieceDialog({ piece, rating, groupRating, onClose, onSave }: { piece: Piece; rating?: Rating; groupRating?: GroupRating; onClose: () => void; onSave: (rating: Rating) => void }) {
