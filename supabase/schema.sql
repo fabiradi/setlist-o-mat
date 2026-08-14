@@ -150,7 +150,7 @@ create or replace function public.save_own_setlist_draft(
 )
 returns void
 language plpgsql
-security definer
+security invoker
 set search_path = ''
 as $$
 declare
