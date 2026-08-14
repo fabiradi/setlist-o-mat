@@ -3,10 +3,10 @@
 import { useEffect, useMemo, useState } from "react";
 import type { Session, SupabaseClient } from "@supabase/supabase-js";
 import {
-  ArrowDown, ArrowUp, BadgeCheck, BarChart3, Check, ChevronDown,
+  Activity, ArrowDown, ArrowUp, BadgeCheck, BarChart3, Check, ChevronDown,
   ChevronRight, CircleHelp, Clock3, Copy, Euro, FileMusic, Filter,
-  Headphones, ListMusic, Lock, Menu, MessageCircle, MoreHorizontal,
-  Music2, Pencil, Play, Plus, Search, Settings, Shuffle, Sparkles,
+  Construction, Headphones, ListMusic, Lock, LogOut, MessageCircle,
+  Music2, Pencil, Play, Plus, Power, Search, Settings, Shuffle, Sparkles,
   Star, Trash2, Trophy, UserRound, Users, X,
 } from "lucide-react";
 import rawPieces from "./data/pieces.json";
@@ -30,6 +30,7 @@ type GroupRating = { average: number; count: number; comments: { author: string;
 type Member = { id: string; displayName: string; isAdmin: boolean; lastSeenAt: string | null };
 type AllowedEmail = { email: string; displayName: string | null };
 type AdminPiecePatch = Pick<Piece, "genres" | "soloStatus" | "solos" | "durationSeconds" | "grade" | "priceCents" | "owned" | "source" | "note">;
+type MaintenanceStatus = { enabled: boolean; message: string; startedAt: string | null };
 
 const pieces = rawPieces as Piece[];
 const TARGET_MIN = 25 * 60;
@@ -58,6 +59,18 @@ function getSuggestedProfileName(displayName: string | null, email: string) {
     ? currentName
     : localPart.split(/[._]+/)[0];
   return candidate ? candidate.charAt(0).toLocaleUpperCase("de") + candidate.slice(1) : "";
+}
+function formatLastActive(value: string | null) {
+  if (!value) return "noch nie aktiv";
+  const seconds = Math.max(0, Math.round((Date.now() - new Date(value).getTime()) / 1000));
+  if (seconds < 60) return "gerade eben";
+  const minutes = Math.floor(seconds / 60);
+  if (minutes < 60) return `vor ${minutes} Min.`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return `vor ${hours} Std.`;
+  const days = Math.floor(hours / 24);
+  if (days < 7) return `vor ${days} ${days === 1 ? "Tag" : "Tagen"}`;
+  return `am ${new Date(value).toLocaleDateString("de-DE", { day: "2-digit", month: "2-digit", year: "numeric" })}`;
 }
 function getMetrics(pieceIds: number[], catalogue: Piece[] = pieces) {
   const selected = pieceIds.map((id) => catalogue.find((piece) => piece.id === id)).filter(Boolean) as Piece[];
@@ -106,6 +119,10 @@ export default function Home() {
   const [adminEditId, setAdminEditId] = useState<number | null>(null);
   const [toast, setToast] = useState<string | null>(null);
   const [isAdmin, setIsAdmin] = useState(!supabase);
+  const [profileReady, setProfileReady] = useState(!supabase);
+  const [onlineMemberIds, setOnlineMemberIds] = useState<string[]>([]);
+  const [maintenance, setMaintenance] = useState<MaintenanceStatus>({ enabled: false, message: "Der Setlist-o-Mat wird gerade gestimmt. Gleich geht es weiter!", startedAt: null });
+  const [maintenanceReady, setMaintenanceReady] = useState(!supabase);
 
   useEffect(() => {
     if (!supabase) return;
@@ -114,20 +131,47 @@ export default function Home() {
       if (active) { setSession(data.session); setAuthReady(true); }
     });
     const { data: listener } = supabase.auth.onAuthStateChange((_event, nextSession) => {
-      setSession(nextSession); setAuthReady(true);
+      setSession((current) => {
+        if (current?.user.id !== nextSession?.user.id) {
+          setProfileReady(false);
+          setIsAdmin(false);
+          setOnlineMemberIds([]);
+          setProfileDisplayName(null);
+          setProfileNameConfirmedAt(undefined);
+        }
+        return nextSession;
+      });
+      setAuthReady(true);
     });
     return () => { active = false; listener.subscription.unsubscribe(); };
+  }, [supabase]);
+
+  useEffect(() => {
+    if (!supabase) return;
+    let active = true;
+    const loadMaintenance = async () => {
+      const { data } = await supabase.from("app_settings").select("maintenance_mode, maintenance_message, maintenance_started_at").eq("id", "global").maybeSingle();
+      if (!active) return;
+      if (data) setMaintenance({ enabled: Boolean(data.maintenance_mode), message: data.maintenance_message, startedAt: data.maintenance_started_at });
+      setMaintenanceReady(true);
+    };
+    void loadMaintenance();
+    const timer = window.setInterval(() => void loadMaintenance(), 10_000);
+    const refreshWhenVisible = () => { if (document.visibilityState === "visible") void loadMaintenance(); };
+    document.addEventListener("visibilitychange", refreshWhenVisible);
+    return () => { active = false; window.clearInterval(timer); document.removeEventListener("visibilitychange", refreshWhenVisible); };
   }, [supabase]);
 
   useEffect(() => {
     if (!supabase || !session) return;
     let active = true;
     const loadProjectData = async () => {
-      void supabase.from("profiles").update({ last_seen_at: new Date().toISOString(), updated_at: new Date().toISOString() }).eq("id", session.user.id);
+      void supabase.from("profiles").update({ last_seen_at: new Date().toISOString() }).eq("id", session.user.id);
       const { data: currentProfile } = await supabase
         .from("profiles").select("is_app_admin, display_name, name_confirmed_at").eq("id", session.user.id).single();
       if (active) {
         setIsAdmin(Boolean(currentProfile?.is_app_admin));
+        setProfileReady(true);
         setProfileDisplayName(currentProfile?.display_name ?? null);
         const confirmedAt = currentProfile?.name_confirmed_at ?? null;
         setProfileNameConfirmedAt(confirmedAt);
@@ -228,6 +272,56 @@ export default function Home() {
     void loadProjectData();
     return () => { active = false; };
   }, [session, supabase]);
+
+  useEffect(() => {
+    if (!supabase || !session) return;
+    const userId = session.user.id;
+    const channel = supabase.channel(`project:${ACTIVE_PROJECT_ID}:presence`, {
+      config: { presence: { key: userId, enabled: true } },
+    });
+    const syncPresence = () => {
+      const state = channel.presenceState<{ user_id?: string }>();
+      const ids = Object.values(state).flatMap((entries) => entries.map((entry) => entry.user_id).filter((id): id is string => Boolean(id)));
+      setOnlineMemberIds([...new Set(ids)]);
+    };
+    const track = () => channel.track({ user_id: userId, online_at: new Date().toISOString() });
+    const touchLastSeen = async () => {
+      if (document.visibilityState !== "visible") return;
+      const now = new Date().toISOString();
+      setMembers((current) => current.map((member) => member.id === userId ? { ...member, lastSeenAt: now } : member));
+      await supabase.from("profiles").update({ last_seen_at: now }).eq("id", userId);
+    };
+    channel.on("presence", { event: "sync" }, syncPresence).subscribe((status) => {
+      if (status === "SUBSCRIBED") { void track(); void touchLastSeen(); }
+    });
+    const heartbeat = window.setInterval(() => void touchLastSeen(), 60_000);
+    const visibility = () => {
+      if (document.visibilityState === "visible") { void track(); void touchLastSeen(); }
+      else void channel.untrack();
+    };
+    document.addEventListener("visibilitychange", visibility);
+    return () => {
+      window.clearInterval(heartbeat);
+      document.removeEventListener("visibilitychange", visibility);
+      void channel.untrack();
+      void supabase.removeChannel(channel);
+    };
+  }, [session, supabase]);
+
+  useEffect(() => {
+    if (!supabase || !session || !isAdmin) return;
+    const refreshMemberActivity = async () => {
+      const { data } = await supabase.from("profiles").select("id, display_name, is_app_admin, last_seen_at");
+      if (!data) return;
+      const latest = new Map(data.map((profile) => [profile.id, profile]));
+      setMembers((current) => current.map((member) => {
+        const profile = latest.get(member.id);
+        return profile ? { id: profile.id, displayName: profile.display_name, isAdmin: profile.is_app_admin, lastSeenAt: profile.last_seen_at } : member;
+      }));
+    };
+    const timer = window.setInterval(() => void refreshMemberActivity(), 60_000);
+    return () => window.clearInterval(timer);
+  }, [isAdmin, session, supabase]);
 
   const catalogue = useMemo(() => (supabase ? remotePieces : pieces).map((piece) => ({ ...piece, ...pieceOverrides[piece.id] })), [pieceOverrides, remotePieces, supabase]);
   const activePiece = catalogue.find((piece) => piece.id === activePieceId) ?? null;
@@ -397,15 +491,39 @@ export default function Home() {
     setMembers((current) => current.filter((item) => item.id !== member.id));
     flash("Nutzer gelöscht");
   };
+  const toggleMaintenance = async () => {
+    if (!supabase || !session || !isAdmin) return;
+    const nextEnabled = !maintenance.enabled;
+    const otherOnline = onlineMemberIds.filter((id) => id !== session.user.id && members.some((member) => member.id === id)).length;
+    if (nextEnabled) {
+      const warning = otherOnline
+        ? `Noch ${otherOnline} ${otherOnline === 1 ? "Person ist" : "Personen sind"} online. Wartungsmodus trotzdem einschalten?`
+        : "Wartungsmodus einschalten? Mitglieder sehen dann sofort die Wartungsseite.";
+      if (!window.confirm(warning)) return;
+    }
+    const now = new Date().toISOString();
+    const { error } = await supabase.from("app_settings").update({
+      maintenance_mode: nextEnabled,
+      maintenance_started_at: nextEnabled ? now : null,
+      maintenance_started_by: nextEnabled ? session.user.id : null,
+      updated_at: now,
+    }).eq("id", "global");
+    if (error) { flash("Wartungsmodus konnte nicht geändert werden"); return; }
+    setMaintenance((current) => ({ ...current, enabled: nextEnabled, startedAt: nextEnabled ? now : null }));
+    flash(nextEnabled ? "Wartungsmodus ist aktiv" : "App ist wieder für alle geöffnet");
+  };
   const publishedSetlists = setlists.filter((item) => item.state !== "draft");
   const ownDraftCount = setlists.filter((item) => item.state === "draft" && (session ? item.ownerId === session.user.id : item.owner === friendlyName)).length;
   const visibleSetlists = setlists.filter((item) => setlistFilter === "all" || (setlistFilter === "finalists" ? item.state === "finalist" || item.state === "final" : item.state === "draft" && (session ? item.ownerId === session.user.id : item.owner === friendlyName)));
   const finalist = setlists.find((item) => item.state === "final") ?? setlists.find((item) => item.state === "finalist");
+  const onlineMembers = members.filter((member) => onlineMemberIds.includes(member.id));
+  const sortedMembers = [...members].sort((a, b) => Number(onlineMemberIds.includes(b.id)) - Number(onlineMemberIds.includes(a.id)) || a.displayName.localeCompare(b.displayName, "de"));
   const navItems: { id: View; label: string; icon: typeof Music2 }[] = [
     { id: "home", label: "Übersicht", icon: BarChart3 }, { id: "pieces", label: "Stücke", icon: FileMusic }, { id: "setlists", label: "Setlists", icon: ListMusic }, ...(isAdmin ? [{ id: "admin" as View, label: "Admin", icon: Settings }] : []),
   ];
 
-  if (!authReady) return <div className="auth-loading"><AppMark /><strong>Setlist-o-Mat stimmt sich …</strong></div>;
+  if (!authReady || !maintenanceReady || (supabase && session && !profileReady)) return <div className="auth-loading"><AppMark /><strong>Setlist-o-Mat stimmt sich …</strong></div>;
+  if (supabase && maintenance.enabled && (!session || !isAdmin)) return <MaintenanceScreen status={maintenance} signedIn={Boolean(session)} />;
   if (supabase && !session) return <LoginScreen supabase={supabase} />;
 
   return <main className="app-shell">
@@ -413,11 +531,12 @@ export default function Home() {
       <div className="brand-block"><AppMark /><div><strong>Setlist-o-Mat</strong><span>Gemeinsam. Klingt besser.</span></div></div>
       <nav aria-label="Hauptnavigation">{navItems.map((item) => { const Icon = item.icon; return <button key={item.id} className={view === item.id ? "active" : ""} onClick={() => setView(item.id)}><Icon />{item.label}{item.id === "pieces" && <span className="nav-count">{catalogue.length - completed}</span>}</button>; })}</nav>
       <div className="side-project"><span>Aktives Projekt</span><button><span><Music2 /> Jahreskonzert 2027</span><ChevronDown /></button></div>
-      <div className="side-user"><div className="avatar">{friendlyName.slice(0, 2).toLocaleUpperCase("de")}</div><button className="profile-trigger" onClick={() => setShowProfileDialog(true)} aria-label="Profilnamen ändern"><strong>{friendlyName}</strong><span>{isAdmin ? "Administrator" : "Mitglied"}</span></button><button className="icon-button" aria-label="Abmelden" onClick={() => supabase?.auth.signOut()}><MoreHorizontal /></button></div>
+      <div className="side-online" title={onlineMembers.length ? onlineMembers.map((member) => member.displayName).join(", ") : "Niemand online"}><span className="presence-dot online" /><strong>{onlineMembers.length} online</strong><small>{onlineMembers.length === 1 ? onlineMembers[0].displayName : onlineMembers.length ? "gerade in der App" : "gerade niemand"}</small></div>
+      <div className="side-user"><div className="avatar">{friendlyName.slice(0, 2).toLocaleUpperCase("de")}</div><button className="profile-trigger" onClick={() => setShowProfileDialog(true)} aria-label="Profilnamen ändern"><strong>{friendlyName}</strong><span>{isAdmin ? "Administrator" : "Mitglied"}</span></button><button className="icon-button logout-button" title="Abmelden" aria-label="Abmelden" onClick={() => supabase?.auth.signOut()}><LogOut /></button></div>
     </aside>
 
     <section className="main-stage">
-      <header className="mobile-header"><div className="mobile-brand"><AppMark /><strong>Setlist-o-Mat</strong></div><div className="mobile-header-actions"><button className="icon-button" aria-label="Profilnamen ändern" onClick={() => setShowProfileDialog(true)}><UserRound /></button><button className="icon-button" aria-label="Abmelden" onClick={() => supabase?.auth.signOut()}><Menu /></button></div></header>
+      <header className="mobile-header"><div className="mobile-brand"><AppMark /><strong>Setlist-o-Mat</strong></div><div className="mobile-header-actions"><span className="mobile-online" title={`${onlineMembers.length} online`}><i />{onlineMembers.length}</span><button className="icon-button" aria-label="Profilnamen ändern" onClick={() => setShowProfileDialog(true)}><UserRound /></button><button className="icon-button logout-button" title="Abmelden" aria-label="Abmelden" onClick={() => supabase?.auth.signOut()}><LogOut /></button></div></header>
 
       {view === "home" && <div className="page dashboard-page">
         <div className="page-heading home-heading"><div><span className="eyebrow"><Sparkles /> Jahreskonzert 2027</span><h1>Hallo {friendlyName}, was klingt gut?</h1><p>Noch {catalogue.length - completed} Stücke warten auf deine Ohren. Danach darfst du bei den anderen spicken.</p></div><button className="primary-button" onClick={() => setView("pieces")}><Headphones /> Weiter bewerten</button></div>
@@ -460,8 +579,9 @@ export default function Home() {
 
       {view === "admin" && isAdmin && <div className="page admin-page">
         <div className="page-heading"><div><span className="eyebrow"><Settings /> Adminbereich</span><h1>Alles im Takt halten.</h1><p>Metadaten vervollständigen, Teilnehmer verwalten und den Auswahlprozess steuern.</p></div><button className="secondary-button"><FileMusic /> Excel importieren</button></div>
-        <div className="admin-metrics"><article><div className="metric-icon coral"><CircleHelp /></div><div><strong>{catalogue.filter((piece) => piece.soloStatus === "unknown").length}</strong><span>Soli noch offen</span></div></article><article><div className="metric-icon yellow"><Filter /></div><div><strong>{catalogue.filter((piece) => piece.genres.length === 0).length}</strong><span>Genres fehlen</span></div></article><article><div className="metric-icon purple"><Users /></div><div><strong>{members.length}</strong><span>Aktive Nutzer</span></div></article><article><div className="metric-icon green"><BadgeCheck /></div><div><strong>{catalogue.filter((piece) => piece.owned).length}</strong><span>Stücke im Bestand</span></div></article></div>
-        <div className="admin-columns"><article className="content-card admin-table-card"><div className="section-title"><div><span className="eyebrow">Datenqualität</span><h2>Offene Metadaten</h2></div><span className="status-pill draft">{catalogue.filter((piece) => piece.soloStatus === "unknown" || piece.genres.length === 0).length} Aufgaben</span></div><div className="admin-piece-list">{catalogue.filter((piece) => piece.soloStatus === "unknown" || piece.genres.length === 0).slice(0, 8).map((piece) => <button key={piece.id} onClick={() => setAdminEditId(piece.id)}><div><strong>{piece.title}</strong><span>{piece.composer}</span></div><div className="missing-tags">{piece.genres.length === 0 && <em>Genre fehlt</em>}{piece.soloStatus === "unknown" && <em>Soli offen</em>}<Pencil /></div></button>)}</div></article><article className="content-card member-card"><div className="section-title"><div><span className="eyebrow">Teilnehmer</span><h2>Wer ist dabei?</h2></div><button className="icon-button" onClick={addAllowedEmail} aria-label="E-Mail freigeben"><Plus /></button></div>{members.map((member, index) => <div className="member-row" key={member.id}><div className={`avatar color-${index}`}>{member.displayName.split(" ").map((part) => part[0]).join("").slice(0, 2).toLocaleUpperCase("de")}</div><div><strong>{member.displayName}</strong><span>{member.isAdmin ? "Administrator" : "Mitglied"} · {member.lastSeenAt ? `aktiv ${new Date(member.lastSeenAt).toLocaleDateString("de-DE")}` : "noch nie aktiv"}</span></div>{member.id !== session?.user.id && <button className="icon-button" aria-label={`${member.displayName} löschen`} onClick={() => void deleteMember(member)}><Trash2 /></button>}</div>)}{allowedEmails.filter((entry) => !members.some((member) => member.displayName === entry.displayName)).map((entry, index) => <div className="member-row" key={entry.email}><div className={`avatar color-${(members.length + index) % 6}`}>?</div><div><strong>{entry.displayName || entry.email}</strong><span>Freigabeliste · noch nie angemeldet</span></div><button className="icon-button" aria-label={`${entry.email} entfernen`} onClick={() => void removeAllowedEmail(entry.email)}><Trash2 /></button></div>)}</article></div>
+        <article className={`maintenance-card ${maintenance.enabled ? "active" : ""}`}><div className="maintenance-icon">{maintenance.enabled ? <Construction /> : <Power />}</div><div><span className="eyebrow">Wartung</span><h2>{maintenance.enabled ? "Die App ist für Mitglieder gesperrt." : "Die App ist geöffnet."}</h2><p>{maintenance.enabled ? "Bestehende Sitzungen bleiben erhalten. Mitglieder gelangen automatisch zurück, sobald du die Wartung beendest." : `${onlineMembers.filter((member) => member.id !== session?.user.id).length} weitere Personen sind gerade online. Vor einem Datenbank-Update am besten warten, bis hier 0 steht.`}</p></div><button className={maintenance.enabled ? "primary-button maintenance-off" : "secondary-button"} onClick={() => void toggleMaintenance()}>{maintenance.enabled ? <><Power /> Wartung beenden</> : <><Construction /> Wartung starten</>}</button></article>
+        <div className="admin-metrics"><article><div className="metric-icon coral"><CircleHelp /></div><div><strong>{catalogue.filter((piece) => piece.soloStatus === "unknown").length}</strong><span>Soli noch offen</span></div></article><article><div className="metric-icon yellow"><Filter /></div><div><strong>{catalogue.filter((piece) => piece.genres.length === 0).length}</strong><span>Genres fehlen</span></div></article><article><div className="metric-icon purple"><Activity /></div><div><strong>{onlineMembers.length}</strong><span>Gerade online</span></div></article><article><div className="metric-icon green"><BadgeCheck /></div><div><strong>{catalogue.filter((piece) => piece.owned).length}</strong><span>Stücke im Bestand</span></div></article></div>
+        <div className="admin-columns"><article className="content-card admin-table-card"><div className="section-title"><div><span className="eyebrow">Datenqualität</span><h2>Offene Metadaten</h2></div><span className="status-pill draft">{catalogue.filter((piece) => piece.soloStatus === "unknown" || piece.genres.length === 0).length} Aufgaben</span></div><div className="admin-piece-list">{catalogue.filter((piece) => piece.soloStatus === "unknown" || piece.genres.length === 0).slice(0, 8).map((piece) => <button key={piece.id} onClick={() => setAdminEditId(piece.id)}><div><strong>{piece.title}</strong><span>{piece.composer}</span></div><div className="missing-tags">{piece.genres.length === 0 && <em>Genre fehlt</em>}{piece.soloStatus === "unknown" && <em>Soli offen</em>}<Pencil /></div></button>)}</div></article><article className="content-card member-card"><div className="section-title"><div><span className="eyebrow">Teilnehmer</span><h2>Wer ist dabei?</h2></div><button className="icon-button" onClick={addAllowedEmail} aria-label="E-Mail freigeben"><Plus /></button></div>{sortedMembers.map((member, index) => { const online = onlineMemberIds.includes(member.id); return <div className={`member-row ${online ? "member-online" : ""}`} key={member.id}><div className={`avatar color-${index}`}>{member.displayName.split(" ").map((part) => part[0]).join("").slice(0, 2).toLocaleUpperCase("de")}</div><div><strong><span className={`presence-dot ${online ? "online" : "offline"}`} />{member.displayName}</strong><span>{member.isAdmin ? "Administrator" : "Mitglied"} · {online ? "jetzt online" : `zuletzt ${formatLastActive(member.lastSeenAt)}`}</span></div>{member.id !== session?.user.id && <button className="icon-button" aria-label={`${member.displayName} löschen`} onClick={() => void deleteMember(member)}><Trash2 /></button>}</div>; })}{allowedEmails.filter((entry) => !members.some((member) => member.displayName === entry.displayName)).map((entry, index) => <div className="member-row" key={entry.email}><div className={`avatar color-${(members.length + index) % 6}`}>?</div><div><strong>{entry.displayName || entry.email}</strong><span>Freigabeliste · noch nie angemeldet</span></div><button className="icon-button" aria-label={`${entry.email} entfernen`} onClick={() => void removeAllowedEmail(entry.email)}><Trash2 /></button></div>)}</article></div>
       </div>}
     </section>
 
@@ -473,6 +593,10 @@ export default function Home() {
     {showProfileDialog && supabase && session && <ProfileNameDialog initialName={suggestedProfileName} required={!profileNameConfirmedAt} email={email} onClose={() => setShowProfileDialog(false)} onSave={saveProfileName} />}
     {toast && <div className="toast"><Check /> {toast}</div>}
   </main>;
+}
+
+function MaintenanceScreen({ status, signedIn }: { status: MaintenanceStatus; signedIn: boolean }) {
+  return <main className="auth-page maintenance-page"><section className="maintenance-screen"><div className="maintenance-screen-mark"><AppMark /><Construction /></div><span className="eyebrow"><Sparkles /> Kurze Generalpause</span><h1>Der Setlist-o-Mat wird gerade gestimmt.</h1><p>{status.message}</p><div className="maintenance-wait"><Activity /><span>{signedIn ? "Du bleibst angemeldet und gelangst automatisch zurück, sobald alles fertig ist." : "Die Anmeldung öffnet sich automatisch wieder, sobald alles fertig ist."}</span></div>{status.startedAt && <small>Wartung seit {new Date(status.startedAt).toLocaleTimeString("de-DE", { hour: "2-digit", minute: "2-digit" })} Uhr</small>}</section></main>;
 }
 
 function LoginScreen({ supabase }: { supabase: SupabaseClient }) {
