@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import type { Session, SupabaseClient } from "@supabase/supabase-js";
 import {
   Activity, ArrowDown, ArrowUp, BadgeCheck, BarChart3, Check, ChevronDown,
@@ -27,10 +27,12 @@ type SetlistReview = { userId: string; author: string; stars: number; comment: s
 type Setlist = { id: number | string; name: string; ownerId: string | null; owner: string; pieceIds: number[]; state: SetlistState; rating: number; ratingCount: number; comments: number; reviews: SetlistReview[] };
 type SetlistRating = { stars: number; comment: string };
 type GroupRating = { average: number; count: number; comments: { author: string; text: string }[] };
-type Member = { id: string; displayName: string; isAdmin: boolean; lastSeenAt: string | null };
+type Member = { id: string; email: string; displayName: string; isAdmin: boolean; lastSeenAt: string | null; ratingsCompleted: number };
 type AllowedEmail = { email: string; displayName: string | null };
-type AdminPiecePatch = Pick<Piece, "genres" | "soloStatus" | "solos" | "durationSeconds" | "grade" | "priceCents" | "owned" | "source" | "note">;
+type AdminPiecePatch = Pick<Piece, "title" | "composer" | "genres" | "sampleUrl" | "purchaseUrl" | "soloStatus" | "solos" | "durationSeconds" | "grade" | "priceCents" | "owned" | "source" | "note">;
 type MaintenanceStatus = { enabled: boolean; message: string; startedAt: string | null };
+type SetlistSaveState = "idle" | "saving" | "saved" | "error";
+type PendingSetlistSave = { setlistId: string; name: string; pieceIds: string[]; publish: boolean };
 
 const pieces = rawPieces as Piece[];
 const TARGET_MIN = 25 * 60;
@@ -52,6 +54,17 @@ const artNames = ["Funkelnder Auftakt", "Fliegende Fermate", "Samtener Paukensch
 function formatDuration(seconds: number) { return `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, "0")}`; }
 function formatMoney(cents: number) { return new Intl.NumberFormat("de-DE", { style: "currency", currency: "EUR", minimumFractionDigits: cents % 100 === 0 ? 0 : 2 }).format(cents / 100); }
 function formatPiecePrice(piece: Piece) { return piece.owned ? "Kaufpreis entfällt" : piece.priceCents > 0 ? `Preis ${formatMoney(piece.priceCents)}` : "Preis noch offen"; }
+function getYoutubeId(url: string | null) { return url?.match(/(?:youtu\.be\/|v=|embed\/)([A-Za-z0-9_-]{6,})/)?.[1] ?? null; }
+function getMissingPieceFields(piece: Piece) {
+  return [
+    !piece.title.trim() && "Titel",
+    !piece.composer.trim() && "Komponist/Arrangeur",
+    piece.durationSeconds <= 0 && "Dauer",
+    piece.genres.length === 0 && "Genre",
+    !piece.sampleUrl && "Hörprobe",
+    piece.soloStatus === "unknown" && "Soli",
+  ].filter(Boolean) as string[];
+}
 function getSuggestedProfileName(displayName: string | null, email: string) {
   const localPart = email.split("@")[0] ?? "";
   const currentName = displayName?.trim() ?? "";
@@ -117,6 +130,11 @@ export default function Home() {
   const [genre, setGenre] = useState("Alle Genres");
   const [onlyOpen, setOnlyOpen] = useState(false);
   const [adminEditId, setAdminEditId] = useState<number | null>(null);
+  const [adminPieceSearch, setAdminPieceSearch] = useState("");
+  const [adminOnlyIncomplete, setAdminOnlyIncomplete] = useState(false);
+  const [setlistSaveState, setSetlistSaveState] = useState<SetlistSaveState>("idle");
+  const pendingSetlistSave = useRef<PendingSetlistSave | null>(null);
+  const setlistSaveRunning = useRef(false);
   const [toast, setToast] = useState<string | null>(null);
   const [isAdmin, setIsAdmin] = useState(!supabase);
   const [profileReady, setProfileReady] = useState(!supabase);
@@ -193,7 +211,7 @@ export default function Home() {
         supabase.from("piece_ratings").select("piece_id, user_id, stars, skipped, comment").in("piece_id", remoteIds),
         supabase.from("setlists").select("id, name, owner_id, state, setlist_items(piece_id, position)").eq("project_id", ACTIVE_PROJECT_ID),
         supabase.from("setlist_ratings").select("setlist_id, user_id, stars, comment"),
-        supabase.from("profiles").select("id, display_name, is_app_admin, last_seen_at"),
+        supabase.from("profiles").select("id, email, display_name, is_app_admin, last_seen_at"),
         supabase.from("project_members").select("user_id, status").eq("project_id", ACTIVE_PROJECT_ID).eq("status", "active"),
         currentProfile?.is_app_admin ? supabase.from("signup_allowed_emails").select("email, display_name") : Promise.resolve({ data: [] as { email: string; display_name: string | null }[] }),
       ]);
@@ -207,12 +225,11 @@ export default function Home() {
         const match = /^xlsx-(\d+)$/.exec(piece.import_key ?? "");
         if (!match) return [];
         const localId = Number(match[1]);
-        const youtubeMatch = piece.sample_url?.match(/(?:youtu\.be\/|v=|embed\/)([A-Za-z0-9_-]{6,})/);
         return [{
           id: localId,
           title: piece.title, composer: piece.composer, durationSeconds: piece.duration_seconds,
           grade: Number(piece.grade), priceCents: piece.price_cents, owned: piece.owned,
-          genres: piece.genres ?? [], sampleUrl: piece.sample_url, youtubeId: youtubeMatch?.[1] ?? null,
+          genres: piece.genres ?? [], sampleUrl: piece.sample_url, youtubeId: getYoutubeId(piece.sample_url),
           purchaseUrl: piece.purchase_url, soloStatus: piece.solo_status, solos: piece.solos,
           source: piece.source, note: piece.note,
         } as Piece];
@@ -238,11 +255,15 @@ export default function Home() {
         comments: item.comments,
       }])));
       const activeMemberIds = new Set((dbMemberships ?? []).map((membership) => membership.user_id));
+      const ratingsCompleted = new Map<string, number>();
+      for (const rating of allPieceRatings ?? []) ratingsCompleted.set(rating.user_id, (ratingsCompleted.get(rating.user_id) ?? 0) + 1);
       setMembers((dbProfiles ?? []).filter((profile) => activeMemberIds.has(profile.id)).map((profile) => ({
         id: profile.id,
+        email: profile.email,
         displayName: profile.display_name,
         isAdmin: profile.is_app_admin,
         lastSeenAt: profile.last_seen_at,
+        ratingsCompleted: ratingsCompleted.get(profile.id) ?? 0,
       })));
       setAllowedEmails((dbAllowedEmails ?? []).map((entry) => ({ email: String(entry.email), displayName: entry.display_name })));
       setSetlists((dbSetlists ?? []).map((setlist) => {
@@ -311,17 +332,25 @@ export default function Home() {
   useEffect(() => {
     if (!supabase || !session || !isAdmin) return;
     const refreshMemberActivity = async () => {
-      const { data } = await supabase.from("profiles").select("id, display_name, is_app_admin, last_seen_at");
-      if (!data) return;
-      const latest = new Map(data.map((profile) => [profile.id, profile]));
+      const remoteIds = Object.values(remotePieceIds);
+      const [{ data: profiles }, { data: ratingRows }] = await Promise.all([
+        supabase.from("profiles").select("id, email, display_name, is_app_admin, last_seen_at"),
+        remoteIds.length
+          ? supabase.from("piece_ratings").select("user_id, piece_id").in("piece_id", remoteIds)
+          : Promise.resolve({ data: [] as { user_id: string; piece_id: string }[] }),
+      ]);
+      if (!profiles) return;
+      const counts = new Map<string, number>();
+      for (const rating of ratingRows ?? []) counts.set(rating.user_id, (counts.get(rating.user_id) ?? 0) + 1);
+      const latest = new Map(profiles.map((profile) => [profile.id, profile]));
       setMembers((current) => current.map((member) => {
         const profile = latest.get(member.id);
-        return profile ? { id: profile.id, displayName: profile.display_name, isAdmin: profile.is_app_admin, lastSeenAt: profile.last_seen_at } : member;
+        return profile ? { id: profile.id, email: profile.email, displayName: profile.display_name, isAdmin: profile.is_app_admin, lastSeenAt: profile.last_seen_at, ratingsCompleted: counts.get(profile.id) ?? 0 } : member;
       }));
     };
     const timer = window.setInterval(() => void refreshMemberActivity(), 60_000);
     return () => window.clearInterval(timer);
-  }, [isAdmin, session, supabase]);
+  }, [isAdmin, remotePieceIds, session, supabase]);
 
   const catalogue = useMemo(() => (supabase ? remotePieces : pieces).map((piece) => ({ ...piece, ...pieceOverrides[piece.id] })), [pieceOverrides, remotePieces, supabase]);
   const activePiece = catalogue.find((piece) => piece.id === activePieceId) ?? null;
@@ -343,8 +372,53 @@ export default function Home() {
   }, [catalogue, genre, onlyOpen, ratings, search]);
   const hasActivePieceFilters = Boolean(search.trim()) || genre !== "Alle Genres" || onlyOpen;
   const clearPieceFilters = () => { setSearch(""); setGenre("Alle Genres"); setOnlyOpen(false); };
+  const incompletePieceCount = catalogue.filter((piece) => getMissingPieceFields(piece).length > 0).length;
+  const adminPieces = useMemo(() => {
+    const query = adminPieceSearch.trim().toLocaleLowerCase("de");
+    return catalogue.filter((piece) => {
+      const searchable = `${piece.title} ${piece.composer} ${piece.source} ${piece.genres.join(" ")}`.toLocaleLowerCase("de");
+      return (!query || searchable.includes(query)) && (!adminOnlyIncomplete || getMissingPieceFields(piece).length > 0);
+    });
+  }, [adminOnlyIncomplete, adminPieceSearch, catalogue]);
 
   const flash = (message: string) => { setToast(message); window.setTimeout(() => setToast(null), 2400); };
+  const flushSetlistSaves = async () => {
+    if (!supabase || setlistSaveRunning.current) return;
+    setlistSaveRunning.current = true;
+    setSetlistSaveState("saving");
+    while (pendingSetlistSave.current) {
+      const save = pendingSetlistSave.current;
+      pendingSetlistSave.current = null;
+      const { error } = await supabase.rpc("save_own_setlist_draft", {
+        requested_setlist_id: save.setlistId,
+        requested_name: save.name,
+        requested_piece_ids: save.pieceIds,
+        requested_publish: save.publish,
+      });
+      if (error) {
+        console.error("setlist save failed", error);
+        pendingSetlistSave.current = null;
+        setlistSaveRunning.current = false;
+        setSetlistSaveState("error");
+        flash("Setlist konnte nicht gespeichert werden – deine letzte Änderung ist nur lokal sichtbar");
+        return;
+      }
+    }
+    setlistSaveRunning.current = false;
+    setSetlistSaveState("saved");
+  };
+  const queueSetlistSave = (setlist: Setlist) => {
+    if (!supabase || typeof setlist.id !== "string") { setSetlistSaveState("saved"); return; }
+    const pieceIds = setlist.pieceIds.flatMap((pieceId) => remotePieceIds[pieceId] ? [remotePieceIds[pieceId]] : []);
+    if (pieceIds.length !== setlist.pieceIds.length) {
+      setSetlistSaveState("error");
+      flash("Setlist konnte nicht gespeichert werden – ein Stück ist nicht mehr verfügbar");
+      return;
+    }
+    pendingSetlistSave.current = { setlistId: setlist.id, name: setlist.name, pieceIds, publish: setlist.state === "published" };
+    setSetlistSaveState("saving");
+    void flushSetlistSaves();
+  };
   const saveProfileName = async (name: string): Promise<string | null> => {
     if (!supabase || !session) return "Dein Profil ist gerade nicht erreichbar.";
     const normalizedName = name.trim().replace(/\s+/g, " ");
@@ -389,6 +463,7 @@ export default function Home() {
           comments: (refreshed ?? []).flatMap((item) => item.comment?.trim() ? [{ author: memberNames.get(item.user_id) ?? "Mitglied", text: item.comment.trim() }] : []),
         } }));
       }
+      if (!previousRating) setMembers((current) => current.map((member) => member.id === session.user.id ? { ...member, ratingsCompleted: member.ratingsCompleted + 1 } : member));
     }
     flash("Bewertung gespeichert");
     return true;
@@ -399,12 +474,12 @@ export default function Home() {
       const { data, error } = await supabase.from("setlists").insert({ project_id: ACTIVE_PROJECT_ID, owner_id: session.user.id, name, state: "draft" }).select("id").single();
       if (error || !data) { flash("Entwurf konnte nicht angelegt werden"); return; }
       const setlist: Setlist = { id: data.id, name, ownerId: session.user.id, owner: friendlyName, pieceIds: [], state: "draft", rating: 0, ratingCount: 0, comments: 0, reviews: [] };
-      setSetlists((current) => [...current, setlist]); setBuilderId(data.id); setView("setlists"); return;
+      setSetlists((current) => [...current, setlist]); setSetlistSaveState("saved"); setBuilderId(data.id); setView("setlists"); return;
     }
     const numericIds = setlists.map((item) => item.id).filter((id): id is number => typeof id === "number");
     const nextId = Math.max(...numericIds, 0) + 1;
     const setlist: Setlist = { id: nextId, name, ownerId: null, owner: friendlyName, pieceIds: [], state: "draft", rating: 0, ratingCount: 0, comments: 0, reviews: [] };
-    setSetlists((current) => [...current, setlist]); setBuilderId(nextId); setView("setlists");
+    setSetlists((current) => [...current, setlist]); setSetlistSaveState("saved"); setBuilderId(nextId); setView("setlists");
   };
   const duplicateSetlist = async (source: Setlist) => {
     const variants = setlists.filter((item) => item.name.startsWith(source.name.split(" – Variante")[0])).length;
@@ -416,12 +491,12 @@ export default function Home() {
       const items = source.pieceIds.flatMap((pieceId, index) => remotePieceIds[pieceId] ? [{ setlist_id: data.id, piece_id: remotePieceIds[pieceId], position: index + 1 }] : []);
       if (items.length) await supabase.from("setlist_items").insert(items);
       const duplicate: Setlist = { ...source, id: data.id, name, ownerId: session.user.id, owner: friendlyName, state: "draft", rating: 0, ratingCount: 0, comments: 0, reviews: [], pieceIds: [...source.pieceIds] };
-      setSetlists((current) => [...current, duplicate]); setBuilderId(data.id); flash("Variante als Entwurf angelegt"); return;
+      setSetlists((current) => [...current, duplicate]); setSetlistSaveState("saved"); setBuilderId(data.id); flash("Variante als Entwurf angelegt"); return;
     }
     const numericIds = setlists.map((item) => item.id).filter((id): id is number => typeof id === "number");
     const nextId = Math.max(...numericIds, 0) + 1;
     const duplicate: Setlist = { ...source, id: nextId, name: `${baseName} – Variante ${Math.max(variants, 1) + 1}`, ownerId: null, owner: friendlyName, state: "draft", rating: 0, ratingCount: 0, comments: 0, reviews: [], pieceIds: [...source.pieceIds] };
-    setSetlists((current) => [...current, duplicate]); setBuilderId(nextId); flash("Variante als Entwurf angelegt");
+    setSetlists((current) => [...current, duplicate]); setSetlistSaveState("saved"); setBuilderId(nextId); flash("Variante als Entwurf angelegt");
   };
   const deleteSetlist = async (setlist: Setlist) => {
     const isOwnDraft = setlist.state === "draft" && (!session || setlist.ownerId === session.user.id);
@@ -441,14 +516,7 @@ export default function Home() {
     if (!current) return;
     const next = { ...current, ...patch };
     setSetlists((items) => items.map((item) => item.id === builderId ? next : item));
-    if (supabase && typeof builderId === "string") void (async () => {
-      await supabase.from("setlists").update({ name: next.name, state: next.state, published_at: next.state === "draft" ? null : new Date().toISOString(), updated_at: new Date().toISOString() }).eq("id", builderId);
-      if (patch.pieceIds) {
-        await supabase.from("setlist_items").delete().eq("setlist_id", builderId);
-        const items = next.pieceIds.flatMap((pieceId, index) => remotePieceIds[pieceId] ? [{ setlist_id: builderId, piece_id: remotePieceIds[pieceId], position: index + 1 }] : []);
-        if (items.length) await supabase.from("setlist_items").insert(items);
-      }
-    })();
+    queueSetlistSave(next);
   };
   const markSetlist = (id: number | string, state: "published" | "finalist" | "final") => {
     setSetlists((current) => current.map((item) => item.id === id ? { ...item, state } : state === "final" && item.state === "final" ? { ...item, state: "finalist" } : item));
@@ -498,10 +566,41 @@ export default function Home() {
   };
   const deleteMember = async (member: Member) => {
     if (!supabase || !isAdmin || member.id === session?.user.id || !window.confirm(`${member.displayName} wirklich vollständig löschen?`)) return;
-    const { error } = await supabase.functions.invoke("admin-delete-user", { body: { userId: member.id } });
-    if (error) { flash("Nutzer konnte nicht gelöscht werden"); return; }
+    const { data, error } = await supabase.functions.invoke("admin-delete-user", { body: { userId: member.id } });
+    if (error || !data?.ok) {
+      let reason = data?.error as string | undefined;
+      const response = (error as { context?: Response } | null)?.context;
+      if (!reason && response) reason = await response.clone().json().then((body) => body?.error as string | undefined).catch(() => undefined);
+      flash(reason || "Nutzer konnte nicht gelöscht werden");
+      return;
+    }
     setMembers((current) => current.filter((item) => item.id !== member.id));
     flash("Nutzer gelöscht");
+  };
+  const savePieceMetadata = async (piece: Piece, patch: AdminPiecePatch) => {
+    if (supabase && remotePieceIds[piece.id]) {
+      const { error } = await supabase.from("pieces").update({
+        title: patch.title,
+        composer: patch.composer,
+        genres: patch.genres,
+        sample_url: patch.sampleUrl,
+        purchase_url: patch.purchaseUrl,
+        solo_status: patch.soloStatus,
+        solos: patch.solos,
+        duration_seconds: patch.durationSeconds,
+        grade: patch.grade,
+        price_cents: patch.priceCents,
+        owned: patch.owned,
+        source: patch.source,
+        note: patch.note,
+        updated_at: new Date().toISOString(),
+      }).eq("id", remotePieceIds[piece.id]);
+      if (error) { console.error("piece metadata save failed", error); flash("Metadaten konnten nicht gespeichert werden"); return false; }
+    }
+    setPieceOverrides((current) => ({ ...current, [piece.id]: { ...current[piece.id], ...patch, youtubeId: getYoutubeId(patch.sampleUrl) } }));
+    setAdminEditId(null);
+    flash("Metadaten gespeichert");
+    return true;
   };
   const toggleMaintenance = async () => {
     if (!supabase || !session || !isAdmin) return;
@@ -584,7 +683,7 @@ export default function Home() {
             <h2>{setlist.name}</h2><p>von {setlist.owner} · {setlist.pieceIds.length} Stücke</p><TimeSignal duration={metrics.duration} compact />
             <div className="setlist-piece-preview">{metrics.selected.slice(0, 4).map((piece, index) => <span key={piece.id}><b>{index + 1}</b>{piece.title}<small>{formatDuration(piece.durationSeconds)}</small></span>)}{metrics.selected.length > 4 && <em>+{metrics.selected.length - 4} weitere</em>}</div>
             <div className="genre-line">{metrics.genres.slice(0, 3).map((item) => <span className="genre-chip" key={item}>{item}</span>)}</div>
-            <div className="setlist-footer">{setlist.state === "draft" ? <button className="secondary-button" onClick={() => setBuilderId(setlist.id)}><Pencil /> Weiterbauen</button> : <button className="setlist-score score-button" onClick={() => setActiveSetlistId(setlist.id)}><Star fill={setlist.ratingCount ? "currentColor" : "none"} /><strong>{setlist.ratingCount ? setlist.rating.toFixed(1).replace(".", ",") : "–"}</strong><small>{ownSetlistRating ? `Du: ${ownSetlistRating.stars}/5 · Diskussion öffnen` : `${setlist.ratingCount}/${Math.max(members.length, 6)} bewertet`}</small></button>}<button className="text-button" onClick={() => duplicateSetlist(setlist)}><Copy /> Duplizieren</button>{canDeleteDraft && <button className="text-button danger-button" onClick={() => void deleteSetlist(setlist)}><Trash2 /> Löschen</button>}</div>
+            <div className="setlist-footer">{setlist.state === "draft" ? <button className="secondary-button" onClick={() => { setSetlistSaveState("saved"); setBuilderId(setlist.id); }}><Pencil /> Weiterbauen</button> : <button className="setlist-score score-button" onClick={() => setActiveSetlistId(setlist.id)}><Star fill={setlist.ratingCount ? "currentColor" : "none"} /><strong>{setlist.ratingCount ? setlist.rating.toFixed(1).replace(".", ",") : "–"}</strong><small>{ownSetlistRating ? `Du: ${ownSetlistRating.stars}/5 · Diskussion öffnen` : `${setlist.ratingCount}/${Math.max(members.length, 6)} bewertet`}</small></button>}<button className="text-button" onClick={() => duplicateSetlist(setlist)}><Copy /> Duplizieren</button>{canDeleteDraft && <button className="text-button danger-button" onClick={() => void deleteSetlist(setlist)}><Trash2 /> Löschen</button>}</div>
             {isAdmin && setlist.state !== "draft" && <div className="admin-setlist-actions"><span>Admin-Auswahl</span>{setlist.state !== "finalist" && setlist.state !== "final" && <button onClick={() => markSetlist(setlist.id, "finalist")}><Trophy /> Finalrunde</button>}{setlist.state === "finalist" && <button onClick={() => markSetlist(setlist.id, "final")}><BadgeCheck /> Als final festlegen</button>}{(setlist.state === "finalist" || setlist.state === "final") && <button onClick={() => markSetlist(setlist.id, "published")}><X /> Zurücksetzen</button>}</div>}
           </article>;
         })}</div> : <div className="empty-setlists"><ListMusic /><strong>Hier ist noch nichts gelandet.</strong><span>{setlistFilter === "mine" ? "Lege eine neue Setlist an – sie bleibt bis zur Veröffentlichung privat." : "Sobald eine Setlist für diese Auswahl passt, erscheint sie hier."}</span></div>}
@@ -594,15 +693,23 @@ export default function Home() {
         <div className="page-heading"><div><span className="eyebrow"><Settings /> Adminbereich</span><h1>Alles im Takt halten.</h1><p>Metadaten vervollständigen, Teilnehmer verwalten und den Auswahlprozess steuern.</p></div><button className="secondary-button"><FileMusic /> Excel importieren</button></div>
         <article className={`maintenance-card ${maintenance.enabled ? "active" : ""}`}><div className="maintenance-icon">{maintenance.enabled ? <Construction /> : <Power />}</div><div><span className="eyebrow">Wartung</span><h2>{maintenance.enabled ? "Die App ist für Mitglieder gesperrt." : "Die App ist geöffnet."}</h2><p>{maintenance.enabled ? "Bestehende Sitzungen bleiben erhalten. Mitglieder gelangen automatisch zurück, sobald du die Wartung beendest." : `${onlineMembers.filter((member) => member.id !== session?.user.id).length} weitere Personen sind gerade online. Vor einem Datenbank-Update am besten warten, bis hier 0 steht.`}</p></div><button className={maintenance.enabled ? "primary-button maintenance-off" : "secondary-button"} onClick={() => void toggleMaintenance()}>{maintenance.enabled ? <><Power /> Wartung beenden</> : <><Construction /> Wartung starten</>}</button></article>
         <div className="admin-metrics"><article><div className="metric-icon coral"><CircleHelp /></div><div><strong>{catalogue.filter((piece) => piece.soloStatus === "unknown").length}</strong><span>Soli noch offen</span></div></article><article><div className="metric-icon yellow"><Filter /></div><div><strong>{catalogue.filter((piece) => piece.genres.length === 0).length}</strong><span>Genres fehlen</span></div></article><article><div className="metric-icon purple"><Activity /></div><div><strong>{onlineMembers.length}</strong><span>Gerade online</span></div></article><article><div className="metric-icon green"><BadgeCheck /></div><div><strong>{catalogue.filter((piece) => piece.owned).length}</strong><span>Stücke im Bestand</span></div></article></div>
-        <div className="admin-columns"><article className="content-card admin-table-card"><div className="section-title"><div><span className="eyebrow">Datenqualität</span><h2>Offene Metadaten</h2></div><span className="status-pill draft">{catalogue.filter((piece) => piece.soloStatus === "unknown" || piece.genres.length === 0).length} Aufgaben</span></div><div className="admin-piece-list">{catalogue.filter((piece) => piece.soloStatus === "unknown" || piece.genres.length === 0).slice(0, 8).map((piece) => <button key={piece.id} onClick={() => setAdminEditId(piece.id)}><div><strong>{piece.title}</strong><span>{piece.composer}</span></div><div className="missing-tags">{piece.genres.length === 0 && <em>Genre fehlt</em>}{piece.soloStatus === "unknown" && <em>Soli offen</em>}<Pencil /></div></button>)}</div></article><article className="content-card member-card"><div className="section-title"><div><span className="eyebrow">Teilnehmer</span><h2>Wer ist dabei?</h2></div><button className="icon-button" onClick={addAllowedEmail} aria-label="E-Mail freigeben"><Plus /></button></div>{sortedMembers.map((member, index) => { const online = onlineMemberIds.includes(member.id); return <div className={`member-row ${online ? "member-online" : ""}`} key={member.id}><div className={`avatar color-${index}`}>{member.displayName.split(" ").map((part) => part[0]).join("").slice(0, 2).toLocaleUpperCase("de")}</div><div><strong><span className={`presence-dot ${online ? "online" : "offline"}`} />{member.displayName}</strong><span>{member.isAdmin ? "Administrator" : "Mitglied"} · {online ? "jetzt online" : `zuletzt ${formatLastActive(member.lastSeenAt)}`}</span></div>{member.id !== session?.user.id && <button className="icon-button" aria-label={`${member.displayName} löschen`} onClick={() => void deleteMember(member)}><Trash2 /></button>}</div>; })}{allowedEmails.filter((entry) => !members.some((member) => member.displayName === entry.displayName)).map((entry, index) => <div className="member-row" key={entry.email}><div className={`avatar color-${(members.length + index) % 6}`}>?</div><div><strong>{entry.displayName || entry.email}</strong><span>Freigabeliste · noch nie angemeldet</span></div><button className="icon-button" aria-label={`${entry.email} entfernen`} onClick={() => void removeAllowedEmail(entry.email)}><Trash2 /></button></div>)}</article></div>
+        <div className="admin-columns">
+          <article className="content-card admin-table-card">
+            <div className="section-title"><div><span className="eyebrow">Stückdaten</span><h2>Gesamter Katalog</h2></div><span className="status-pill draft">{incompletePieceCount} unvollständig</span></div>
+            <div className="admin-piece-controls"><label className="search-field"><Search /><input value={adminPieceSearch} onChange={(event) => setAdminPieceSearch(event.target.value)} placeholder="Titel, Komponist, Quelle …" /></label><button className={adminOnlyIncomplete ? "toggle active" : "toggle"} onClick={() => setAdminOnlyIncomplete((value) => !value)}><Filter /> Nur unvollständige</button></div>
+            <div className="admin-piece-list">{adminPieces.map((piece) => { const missing = getMissingPieceFields(piece); return <button key={piece.id} onClick={() => setAdminEditId(piece.id)}><div><strong>{piece.title}</strong><span>{piece.composer}</span></div><div className="missing-tags">{missing.length ? missing.slice(0, 2).map((field) => <em key={field}>{field} fehlt</em>) : <em className="complete">Vollständig</em>}{missing.length > 2 && <em>+{missing.length - 2}</em>}<Pencil /></div></button>; })}</div>
+            {!adminPieces.length && <p className="admin-empty">Keine passenden Stücke gefunden.</p>}
+          </article>
+          <article className="content-card member-card"><div className="section-title"><div><span className="eyebrow">Teilnehmer</span><h2>Wer ist dabei?</h2></div><button className="icon-button" onClick={addAllowedEmail} aria-label="E-Mail freigeben"><Plus /></button></div>{sortedMembers.map((member, index) => { const online = onlineMemberIds.includes(member.id); const ratingProgress = catalogue.length ? Math.round(member.ratingsCompleted / catalogue.length * 100) : 0; return <div className={`member-row ${online ? "member-online" : ""}`} key={member.id}><div className={`avatar color-${index}`}>{member.displayName.split(" ").map((part) => part[0]).join("").slice(0, 2).toLocaleUpperCase("de")}</div><div className="member-copy"><strong><span className={`presence-dot ${online ? "online" : "offline"}`} />{member.displayName}</strong><span>{member.email}</span><span>{member.isAdmin ? "Administrator" : "Mitglied"} · {online ? "jetzt online" : `zuletzt ${formatLastActive(member.lastSeenAt)}`}</span><div className="member-progress"><i><b style={{ width: `${ratingProgress}%` }} /></i><small>{member.ratingsCompleted} von {catalogue.length} Stücken bearbeitet</small></div></div>{member.id !== session?.user.id ? <button className="icon-button" aria-label={`${member.displayName} löschen`} onClick={() => void deleteMember(member)}><Trash2 /></button> : <span className="self-label">Du</span>}</div>; })}{allowedEmails.filter((entry) => !members.some((member) => member.email.toLocaleLowerCase("de") === entry.email.toLocaleLowerCase("de"))).map((entry, index) => <div className="member-row" key={entry.email}><div className={`avatar color-${(members.length + index) % 6}`}>?</div><div><strong>{entry.displayName || entry.email}</strong><span>Freigabeliste · noch nie angemeldet</span></div><button className="icon-button" aria-label={`${entry.email} entfernen`} onClick={() => void removeAllowedEmail(entry.email)}><Trash2 /></button></div>)}</article>
+        </div>
       </div>}
     </section>
 
     <nav className="bottom-nav" aria-label="Mobile Navigation">{navItems.map((item) => { const Icon = item.icon; return <button key={item.id} className={view === item.id ? "active" : ""} onClick={() => setView(item.id)}><Icon /><span>{item.label}</span>{item.id === "pieces" && <i>{catalogue.length - completed}</i>}</button>; })}</nav>
     {activePiece && <PieceDialog piece={activePiece} rating={ratings[activePiece.id]} groupRating={groupRatings[activePiece.id]} onClose={() => setActivePieceId(null)} onSave={(rating) => saveRating(activePiece.id, rating)} />}
     {activeSetlist && <SetlistDialog catalogue={catalogue} setlist={activeSetlist} rating={setlistRatings[String(activeSetlist.id)]} currentUserId={session?.user.id ?? "demo-current"} onClose={() => setActiveSetlistId(null)} onSave={(rating) => { void saveSetlistRating(activeSetlist, rating); setActiveSetlistId(null); }} />}
-    {builder && <BuilderDialog catalogue={catalogue} setlist={builder} onClose={() => setBuilderId(null)} onPatch={patchBuilder} onPublish={() => { patchBuilder({ state: "published" }); setBuilderId(null); flash("Setlist veröffentlicht – jetzt darf bewertet werden"); }} />}
-    {adminPiece && <AdminPieceDialog piece={adminPiece} onClose={() => setAdminEditId(null)} onSave={(patch) => { setPieceOverrides((current) => ({ ...current, [adminPiece.id]: { ...current[adminPiece.id], ...patch } })); if (supabase && remotePieceIds[adminPiece.id]) void supabase.from("pieces").update({ genres: patch.genres, solo_status: patch.soloStatus, solos: patch.solos, duration_seconds: patch.durationSeconds, grade: patch.grade, price_cents: patch.priceCents, owned: patch.owned, source: patch.source, note: patch.note, updated_at: new Date().toISOString() }).eq("id", remotePieceIds[adminPiece.id]); setAdminEditId(null); flash("Metadaten gespeichert"); }} />}
+    {builder && <BuilderDialog catalogue={catalogue} setlist={builder} saveState={setlistSaveState} onClose={() => setBuilderId(null)} onPatch={patchBuilder} onPublish={() => { patchBuilder({ state: "published" }); setBuilderId(null); flash("Setlist veröffentlicht – jetzt darf bewertet werden"); }} />}
+    {adminPiece && <AdminPieceDialog piece={adminPiece} onClose={() => setAdminEditId(null)} onSave={(patch) => savePieceMetadata(adminPiece, patch)} />}
     {showProfileDialog && supabase && session && <ProfileNameDialog initialName={suggestedProfileName} required={!profileNameConfirmedAt} email={email} onClose={() => setShowProfileDialog(false)} onSave={saveProfileName} />}
     {toast && <div className="toast"><Check /> {toast}</div>}
   </main>;
@@ -668,12 +775,13 @@ function PieceDialog({ piece, rating, groupRating, onClose, onSave }: { piece: P
   return <div className="dialog-backdrop" onMouseDown={(event) => !saving && event.target === event.currentTarget && onClose()}><section className="dialog piece-dialog" role="dialog" aria-modal="true" aria-label={`${piece.title} bewerten`}><button className="dialog-close" disabled={saving} onClick={onClose}><X /></button><div className="dialog-kicker"><Headphones /> Hörprobe & Bewertung</div><h2>{piece.title}</h2><p className="dialog-subtitle">{piece.composer}</p><div className="dialog-facts"><span><Clock3 /> {formatDuration(piece.durationSeconds)}</span><span>Grade {piece.grade}</span><span><Euro /> {formatPiecePrice(piece)}</span>{piece.genres.map((item) => <span className="genre-chip" key={item}>{item}</span>)}{piece.owned && <span className="owned-pill"><BadgeCheck /> Im Bestand</span>}{piece.soloStatus === "available" && <span className="solo-chip"><UserRound /> Solo: {piece.solos || "Instrumente noch offen"}</span>}{piece.soloStatus === "unknown" && <span className="solo-chip unknown"><CircleHelp /> Soli noch nicht erfasst</span>}</div>{piece.youtubeId ? <div className="youtube-wrap"><iframe src={`https://www.youtube-nocookie.com/embed/${piece.youtubeId}?rel=0`} title={`Hörprobe ${piece.title}`} allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture" allowFullScreen /></div> : <div className="no-sample"><Headphones /><strong>Keine Hörprobe hinterlegt</strong><span>Du kannst das Stück trotzdem bewerten oder überspringen.</span></div>}<div className="rating-panel"><div className="rating-question"><span>Wie gut passt das Stück ins Konzert?</span><Stars value={skipped ? null : stars} onChange={(value) => { setSkipped(false); setStars(value); }} /></div><button className={skipped ? "skip-button active" : "skip-button"} onClick={() => { setSkipped(true); setStars(null); }}><CircleHelp /> Kann ich nicht beurteilen</button><label><span>Dein Kommentar <small>optional</small></span><textarea value={comment} onChange={(event) => setComment(event.target.value)} placeholder="Was spricht dafür oder dagegen? Soli, Wirkung, Besetzung …" /></label>{rating && groupRating?.count ? <div className="group-peek"><div><Users /><span>Gruppe · {groupRating.count} Bewertungen</span></div><strong>Ø {groupRating.average.toFixed(1).replace(".", ",")}</strong><Stars value={Math.round(groupRating.average)} small />{groupRating.comments.length > 0 && <details><summary>{groupRating.comments.length} Kommentare lesen</summary>{groupRating.comments.map((entry, index) => <p key={`${entry.author}-${index}`}><strong>{entry.author}:</strong> {entry.text}</p>)}</details>}</div> : rating && <div className="group-peek"><div><Users /><span>Noch keine weitere Gruppenbewertung</span></div></div>}</div><div className="dialog-actions"><button className="text-button" disabled={saving} onClick={onClose}>Abbrechen</button><button className="primary-button" disabled={saving || (!stars && !skipped)} onClick={() => void submit()}><Check /> {saving ? "Wird gespeichert …" : "Bewertung speichern"}</button></div></section></div>;
 }
 
-function BuilderDialog({ catalogue, setlist, onClose, onPatch, onPublish }: { catalogue: Piece[]; setlist: Setlist; onClose: () => void; onPatch: (patch: Partial<Setlist>) => void; onPublish: () => void }) {
+function BuilderDialog({ catalogue, setlist, saveState, onClose, onPatch, onPublish }: { catalogue: Piece[]; setlist: Setlist; saveState: SetlistSaveState; onClose: () => void; onPatch: (patch: Partial<Setlist>) => void; onPublish: () => void }) {
   const [query, setQuery] = useState("");
   const metrics = getMetrics(setlist.pieceIds, catalogue);
   const candidates = catalogue.filter((piece) => !setlist.pieceIds.includes(piece.id) && `${piece.title} ${piece.composer}`.toLowerCase().includes(query.toLowerCase())).slice(0, 6);
   const move = (index: number, delta: number) => { const target = index + delta; if (target < 0 || target >= setlist.pieceIds.length) return; const next = [...setlist.pieceIds]; [next[index], next[target]] = [next[target], next[index]]; onPatch({ pieceIds: next }); };
-  return <div className="dialog-backdrop builder-backdrop"><section className="dialog builder-dialog" role="dialog" aria-modal="true" aria-label="Setlist bearbeiten"><header className="builder-header"><div><span className="dialog-kicker"><Lock /> Privater Entwurf</span><input value={setlist.name} onChange={(event) => onPatch({ name: event.target.value })} aria-label="Name der Setlist" /></div><button className="dialog-close" onClick={onClose}><X /></button></header><div className="builder-layout"><div className="builder-main"><div className="builder-section-title"><div><h3>Programmfolge</h3><span>{setlist.pieceIds.length} Stücke · per Pfeil sortieren</span></div><button className="text-button" onClick={() => { const alternatives = artNames.filter((name) => name !== setlist.name); onPatch({ name: alternatives[Math.floor(Math.random() * alternatives.length)] }); }}><Shuffle /> Kunstname würfeln</button></div><div className="builder-items">{metrics.selected.length === 0 && <div className="empty-builder"><ListMusic /><strong>Deine Bühne ist noch leer.</strong><span>Füge unten die ersten Stücke hinzu.</span></div>}{metrics.selected.map((piece, index) => <div className="builder-item" key={piece.id}><span className="order-number">{index + 1}</span><div className="builder-item-copy"><strong>{piece.title}</strong><span>{piece.composer}</span><div><em>{formatDuration(piece.durationSeconds)}</em><em>Grade {piece.grade}</em>{piece.genres[0] && <em>{piece.genres[0]}</em>}</div></div><div className="reorder"><button onClick={() => move(index, -1)} disabled={index === 0}><ArrowUp /></button><button onClick={() => move(index, 1)} disabled={index === metrics.selected.length - 1}><ArrowDown /></button></div><button className="remove-button" onClick={() => onPatch({ pieceIds: setlist.pieceIds.filter((id) => id !== piece.id) })}><Trash2 /></button></div>)}</div><div className="add-pieces"><h3>Stück hinzufügen</h3><label className="search-field"><Search /><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Titel suchen" /></label><div className="candidate-list">{candidates.map((piece) => <button key={piece.id} onClick={() => onPatch({ pieceIds: [...setlist.pieceIds, piece.id] })}><Plus /><div><strong>{piece.title}</strong><span>{piece.composer}</span></div><em>{formatDuration(piece.durationSeconds)}</em></button>)}</div></div></div><aside className="builder-summary"><span className="eyebrow">Live-Check</span><h3>Passt das Programm?</h3><TimeSignal duration={metrics.duration} /><div className="summary-stat"><span><Clock3 /> Dauer</span><strong>{formatDuration(metrics.duration)}</strong></div><div className="summary-stat"><span><BarChart3 /> Schwierigkeit</span><strong>{metrics.minGrade || "–"}–{metrics.maxGrade || "–"}</strong><small>Ø {metrics.avgGrade ? metrics.avgGrade.toFixed(1).replace(".", ",") : "–"}</small></div><div className="summary-stat"><span><Euro /> Noch zu kaufen</span><strong>{formatMoney(metrics.cost)}</strong></div><div className="summary-genres"><span>Genre-Mix</span><div>{metrics.genres.length ? metrics.genres.map((item) => <em key={item}>{item}</em>) : <small>Noch keine Stücke gewählt</small>}</div></div><button className="primary-button publish-button" disabled={setlist.pieceIds.length === 0} onClick={onPublish}><Sparkles /> Setlist veröffentlichen</button><small className="publish-note">Danach ist die Zusammenstellung gesperrt. Varianten bleiben jederzeit möglich.</small></aside></div></section></div>;
+  const saveLabel = saveState === "saving" ? "Wird gespeichert …" : saveState === "error" ? "Nicht gespeichert" : "Gespeichert";
+  return <div className="dialog-backdrop builder-backdrop"><section className="dialog builder-dialog" role="dialog" aria-modal="true" aria-label="Setlist bearbeiten"><header className="builder-header"><div><span className="dialog-kicker"><Lock /> Privater Entwurf</span><input value={setlist.name} onChange={(event) => onPatch({ name: event.target.value })} aria-label="Name der Setlist" /><span className={`builder-save-state ${saveState}`} aria-live="polite">{saveState === "saving" ? <Activity /> : saveState === "error" ? <CircleHelp /> : <Check />}{saveLabel}</span></div><button className="dialog-close" onClick={onClose}><X /></button></header><div className="builder-layout"><div className="builder-main"><div className="builder-section-title"><div><h3>Programmfolge</h3><span>{setlist.pieceIds.length} Stücke · per Pfeil sortieren</span></div><button className="text-button" onClick={() => { const alternatives = artNames.filter((name) => name !== setlist.name); onPatch({ name: alternatives[Math.floor(Math.random() * alternatives.length)] }); }}><Shuffle /> Kunstname würfeln</button></div><div className="builder-items">{metrics.selected.length === 0 && <div className="empty-builder"><ListMusic /><strong>Deine Bühne ist noch leer.</strong><span>Füge unten die ersten Stücke hinzu.</span></div>}{metrics.selected.map((piece, index) => <div className="builder-item" key={piece.id}><span className="order-number">{index + 1}</span><div className="builder-item-copy"><strong>{piece.title}</strong><span>{piece.composer}</span><div><em>{formatDuration(piece.durationSeconds)}</em><em>Grade {piece.grade}</em>{piece.genres[0] && <em>{piece.genres[0]}</em>}</div></div><div className="reorder"><button onClick={() => move(index, -1)} disabled={index === 0}><ArrowUp /></button><button onClick={() => move(index, 1)} disabled={index === metrics.selected.length - 1}><ArrowDown /></button></div><button className="remove-button" onClick={() => onPatch({ pieceIds: setlist.pieceIds.filter((id) => id !== piece.id) })}><Trash2 /></button></div>)}</div><div className="add-pieces"><h3>Stück hinzufügen</h3><label className="search-field"><Search /><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Titel suchen" /></label><div className="candidate-list">{candidates.map((piece) => <button key={piece.id} onClick={() => onPatch({ pieceIds: [...setlist.pieceIds, piece.id] })}><Plus /><div><strong>{piece.title}</strong><span>{piece.composer}</span></div><em>{formatDuration(piece.durationSeconds)}</em></button>)}</div></div></div><aside className="builder-summary"><span className="eyebrow">Live-Check</span><h3>Passt das Programm?</h3><TimeSignal duration={metrics.duration} /><div className="summary-stat"><span><Clock3 /> Dauer</span><strong>{formatDuration(metrics.duration)}</strong></div><div className="summary-stat"><span><BarChart3 /> Schwierigkeit</span><strong>{metrics.minGrade || "–"}–{metrics.maxGrade || "–"}</strong><small>Ø {metrics.avgGrade ? metrics.avgGrade.toFixed(1).replace(".", ",") : "–"}</small></div><div className="summary-stat"><span><Euro /> Noch zu kaufen</span><strong>{formatMoney(metrics.cost)}</strong></div><div className="summary-genres"><span>Genre-Mix</span><div>{metrics.genres.length ? metrics.genres.map((item) => <em key={item}>{item}</em>) : <small>Noch keine Stücke gewählt</small>}</div></div><button className="primary-button publish-button" disabled={setlist.pieceIds.length === 0 || saveState === "error"} onClick={onPublish}><Sparkles /> Setlist veröffentlichen</button><small className="publish-note">Danach ist die Zusammenstellung gesperrt. Varianten bleiben jederzeit möglich.</small></aside></div></section></div>;
 }
 
 function SetlistDialog({ catalogue, setlist, rating, currentUserId, onClose, onSave }: { catalogue: Piece[]; setlist: Setlist; rating?: SetlistRating; currentUserId: string; onClose: () => void; onSave: (rating: SetlistRating) => void }) {
@@ -684,8 +792,12 @@ function SetlistDialog({ catalogue, setlist, rating, currentUserId, onClose, onS
   return <div className="dialog-backdrop" onMouseDown={(event) => event.target === event.currentTarget && onClose()}><section className="dialog setlist-dialog" role="dialog" aria-modal="true" aria-label={`${setlist.name} bewerten`}><button className="dialog-close" onClick={onClose}><X /></button><span className="dialog-kicker"><ListMusic /> Setlist bewerten</span><h2>{setlist.name}</h2><p className="dialog-subtitle">von {setlist.owner} · {setlist.pieceIds.length} Stücke</p><TimeSignal duration={metrics.duration} /><div className="setlist-dialog-metrics"><span><BarChart3 /> Grade {metrics.minGrade}–{metrics.maxGrade} · Ø {metrics.avgGrade.toFixed(1).replace(".", ",")}</span><span><Euro /> {formatMoney(metrics.cost)} zu kaufen</span></div><div className="setlist-dialog-genres">{metrics.genres.map((genre) => <span className="genre-chip" key={genre}>{genre}</span>)}</div><ol className="setlist-dialog-pieces">{metrics.selected.map((piece, index) => <li key={piece.id}><b className="dialog-order">{index + 1}</b><div><strong>{piece.title}</strong><span>{piece.composer}</span>{piece.soloStatus === "available" && <span className="dialog-solo"><UserRound /> Soli: {piece.solos || "Instrumente noch offen"}</span>}{piece.soloStatus === "unknown" && <span className="dialog-solo unknown"><CircleHelp /> Soli noch nicht erfasst</span>}</div><small>{formatDuration(piece.durationSeconds)}</small></li>)}</ol><section className="setlist-discussion" aria-label="Gruppenbewertung"><div className="discussion-summary"><div><Users /><span>Gruppe · {setlist.ratingCount} {setlist.ratingCount === 1 ? "Bewertung" : "Bewertungen"}</span></div><strong>{setlist.ratingCount ? `Ø ${setlist.rating.toFixed(1).replace(".", ",")}` : "Noch keine Gruppenwertung"}</strong>{setlist.ratingCount > 0 && <Stars value={Math.round(setlist.rating)} small />}</div>{comments.length ? <div className="discussion-comments">{comments.map((review) => <article key={review.userId}><header><strong>{review.userId === currentUserId ? "Du" : review.author}</strong><span><Star fill="currentColor" /> {review.stars}/5</span></header><p>{review.comment}</p></article>)}</div> : <p className="discussion-empty">Noch keine Kommentare – du kannst die Diskussion eröffnen.</p>}</section><div className="rating-panel"><div className="rating-question"><span>Wie gut funktioniert diese Reihenfolge?</span><Stars value={stars} onChange={setStars} /></div><label><span>Dein Kommentar <small>optional und später änderbar</small></span><textarea value={comment} onChange={(event) => setComment(event.target.value)} placeholder="Dramaturgie, Dauer, Genre-Mix, Soli …" /></label></div><div className="dialog-actions"><button className="text-button" onClick={onClose}>Abbrechen</button><button className="primary-button" disabled={!stars} onClick={() => stars && onSave({ stars, comment })}><Check /> Bewertung speichern</button></div></section></div>;
 }
 
-function AdminPieceDialog({ piece, onClose, onSave }: { piece: Piece; onClose: () => void; onSave: (patch: AdminPiecePatch) => void }) {
+function AdminPieceDialog({ piece, onClose, onSave }: { piece: Piece; onClose: () => void; onSave: (patch: AdminPiecePatch) => Promise<boolean> }) {
+  const [title, setTitle] = useState(piece.title);
+  const [composer, setComposer] = useState(piece.composer);
   const [genreText, setGenreText] = useState(piece.genres.join(", "));
+  const [sampleUrl, setSampleUrl] = useState(piece.sampleUrl ?? "");
+  const [purchaseUrl, setPurchaseUrl] = useState(piece.purchaseUrl ?? "");
   const [soloStatus, setSoloStatus] = useState<Piece["soloStatus"]>(piece.soloStatus);
   const [solos, setSolos] = useState(piece.solos ?? "");
   const [duration, setDuration] = useState(formatDuration(piece.durationSeconds));
@@ -694,15 +806,27 @@ function AdminPieceDialog({ piece, onClose, onSave }: { piece: Piece; onClose: (
   const [owned, setOwned] = useState(piece.owned);
   const [source, setSource] = useState(piece.source);
   const [note, setNote] = useState(piece.note ?? "");
-  const save = () => {
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const save = async () => {
     const [minutes, seconds = "0"] = duration.split(":");
-    onSave({
+    const parsedDuration = Number(minutes) * 60 + Number(seconds);
+    const parsedGrade = Number(grade);
+    if (!title.trim()) { setError("Bitte einen Titel eingeben."); return; }
+    if (!Number.isFinite(parsedDuration) || parsedDuration <= 0 || Number(seconds) < 0 || Number(seconds) > 59) { setError("Bitte die Dauer als mm:ss eingeben."); return; }
+    if (!Number.isFinite(parsedGrade) || parsedGrade <= 0) { setError("Bitte einen gültigen Grade eingeben."); return; }
+    setSaving(true); setError(null);
+    const saved = await onSave({
+      title: title.trim(), composer: composer.trim(),
       genres: genreText.split(",").map((item) => item.trim()).filter(Boolean),
+      sampleUrl: sampleUrl.trim() || null, purchaseUrl: purchaseUrl.trim() || null,
       soloStatus, solos: solos.trim() || null,
-      durationSeconds: Math.max(1, Number(minutes) * 60 + Number(seconds)),
-      grade: Number(grade), priceCents: Math.max(0, Math.round(Number(price.replace(",", ".")) * 100)),
+      durationSeconds: parsedDuration,
+      grade: parsedGrade, priceCents: Math.max(0, Math.round(Number(price.replace(",", ".")) * 100) || 0),
       owned, source: source.trim(), note: note.trim() || null,
     });
+    setSaving(false);
+    if (!saved) setError("Die Änderungen konnten nicht gespeichert werden.");
   };
-  return <div className="dialog-backdrop"><section className="dialog admin-dialog"><button className="dialog-close" onClick={onClose}><X /></button><span className="dialog-kicker"><Pencil /> Metadaten bearbeiten</span><h2>{piece.title}</h2><p className="dialog-subtitle">{piece.composer}</p><div className="form-grid"><label><span>Genre</span><input value={genreText} onChange={(event) => setGenreText(event.target.value)} placeholder="z. B. Film, Rock/Pop" /></label><label><span>Soli-Status</span><select value={soloStatus} onChange={(event) => setSoloStatus(event.target.value as Piece["soloStatus"])}><option value="unknown">Noch unbekannt</option><option value="none">Keine Soli</option><option value="available">Soli vorhanden</option></select></label><label className="full"><span>Instrumente / Hinweise zu Soli</span><input value={solos} onChange={(event) => setSolos(event.target.value)} placeholder="z. B. Altsaxophon, Oboe, Posaune …" /></label><label><span>Dauer (mm:ss)</span><input value={duration} onChange={(event) => setDuration(event.target.value)} /></label><label><span>Grade</span><input type="number" step="0.5" value={grade} onChange={(event) => setGrade(event.target.value)} /></label><label><span>Preis in Euro</span><input inputMode="decimal" value={price} onChange={(event) => setPrice(event.target.value)} /></label><label className="check-label"><input type="checkbox" checked={owned} onChange={(event) => setOwned(event.target.checked)} /><span>Bereits im Bestand</span></label><label className="full"><span>Quelle</span><input value={source} onChange={(event) => setSource(event.target.value)} /></label><label className="full"><span>Kommentar / Medley-Stücke</span><textarea value={note} onChange={(event) => setNote(event.target.value)} /></label></div><div className="dialog-actions"><button className="text-button" onClick={onClose}>Abbrechen</button><button className="primary-button" onClick={save}><Check /> Speichern</button></div></section></div>;
+  return <div className="dialog-backdrop"><section className="dialog admin-dialog"><button className="dialog-close" disabled={saving} onClick={onClose}><X /></button><span className="dialog-kicker"><Pencil /> Metadaten bearbeiten</span><h2>{piece.title}</h2><p className="dialog-subtitle">Alle Katalogdaten dieses Stücks</p><div className="form-grid"><label className="full"><span>Titel</span><input value={title} onChange={(event) => setTitle(event.target.value)} /></label><label className="full"><span>Komponist / Arrangeur</span><input value={composer} onChange={(event) => setComposer(event.target.value)} /></label><label><span>Genre</span><input value={genreText} onChange={(event) => setGenreText(event.target.value)} placeholder="z. B. Film, Rock/Pop" /></label><label><span>Soli-Status</span><select value={soloStatus} onChange={(event) => setSoloStatus(event.target.value as Piece["soloStatus"])}><option value="unknown">Noch unbekannt</option><option value="none">Keine Soli</option><option value="available">Soli vorhanden</option></select></label><label className="full"><span>Instrumente / Hinweise zu Soli</span><input value={solos} onChange={(event) => setSolos(event.target.value)} placeholder="z. B. Altsaxophon, Oboe, Posaune …" /></label><label><span>Dauer (mm:ss)</span><input value={duration} onChange={(event) => setDuration(event.target.value)} /></label><label><span>Grade</span><input type="number" step="0.5" value={grade} onChange={(event) => setGrade(event.target.value)} /></label><label><span>Preis in Euro</span><input inputMode="decimal" value={price} onChange={(event) => setPrice(event.target.value)} /></label><label className="check-label"><input type="checkbox" checked={owned} onChange={(event) => setOwned(event.target.checked)} /><span>Bereits im Bestand</span></label><label className="full"><span>Hörprobe (YouTube-URL)</span><input type="url" value={sampleUrl} onChange={(event) => setSampleUrl(event.target.value)} placeholder="https://www.youtube.com/watch?v=…" /></label><label className="full"><span>Kauflink</span><input type="url" value={purchaseUrl} onChange={(event) => setPurchaseUrl(event.target.value)} placeholder="https://…" /></label><label className="full"><span>Quelle</span><input value={source} onChange={(event) => setSource(event.target.value)} /></label><label className="full"><span>Kommentar / Medley-Stücke</span><textarea value={note} onChange={(event) => setNote(event.target.value)} /></label></div>{error && <div className="profile-error"><CircleHelp /> {error}</div>}<div className="dialog-actions"><button className="text-button" disabled={saving} onClick={onClose}>Abbrechen</button><button className="primary-button" disabled={saving} onClick={() => void save()}><Check /> {saving ? "Wird gespeichert …" : "Speichern"}</button></div></section></div>;
 }
