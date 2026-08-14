@@ -24,6 +24,9 @@ type View = "home" | "pieces" | "setlists" | "admin";
 type SetlistState = "draft" | "published" | "finalist" | "final";
 type Setlist = { id: number | string; name: string; owner: string; pieceIds: number[]; state: SetlistState; rating: number; ratingCount: number; comments: number };
 type SetlistRating = { stars: number; comment: string };
+type GroupRating = { average: number; count: number; comments: { author: string; text: string }[] };
+type Member = { id: string; displayName: string; isAdmin: boolean; lastSeenAt: string | null };
+type AllowedEmail = { email: string; displayName: string | null };
 type AdminPiecePatch = Pick<Piece, "genres" | "soloStatus" | "solos" | "durationSeconds" | "grade" | "priceCents" | "owned" | "source" | "note">;
 
 const pieces = rawPieces as Piece[];
@@ -77,7 +80,12 @@ export default function Home() {
   const [setlistRatings, setSetlistRatings] = useState<Record<string, SetlistRating>>({});
   const [builderId, setBuilderId] = useState<number | string | null>(null);
   const [remotePieceIds, setRemotePieceIds] = useState<Record<number, string>>({});
+  const [remotePieces, setRemotePieces] = useState<Piece[]>([]);
   const [pieceOverrides, setPieceOverrides] = useState<Record<number, Partial<Piece>>>({});
+  const [groupRatings, setGroupRatings] = useState<Record<number, GroupRating>>({});
+  const [members, setMembers] = useState<Member[]>([]);
+  const [allowedEmails, setAllowedEmails] = useState<AllowedEmail[]>([]);
+  const [profileDisplayName, setProfileDisplayName] = useState<string | null>(null);
   const [search, setSearch] = useState("");
   const [genre, setGenre] = useState("Alle Genres");
   const [onlyOpen, setOnlyOpen] = useState(false);
@@ -103,8 +111,9 @@ export default function Home() {
     const loadProjectData = async () => {
       void supabase.from("profiles").update({ last_seen_at: new Date().toISOString(), updated_at: new Date().toISOString() }).eq("id", session.user.id);
       const { data: currentProfile } = await supabase
-        .from("profiles").select("is_app_admin").eq("id", session.user.id).single();
+        .from("profiles").select("is_app_admin, display_name").eq("id", session.user.id).single();
       if (active) setIsAdmin(Boolean(currentProfile?.is_app_admin));
+      if (active) setProfileDisplayName(currentProfile?.display_name ?? null);
       const { data: dbPieces, error: piecesError } = await supabase
         .from("pieces").select("*").eq("project_id", ACTIVE_PROJECT_ID).eq("archived", false);
       if (piecesError || !dbPieces) { if (active) setToast("Supabase-Daten konnten nicht geladen werden"); return; }
@@ -116,38 +125,63 @@ export default function Home() {
       const localByRemote = new Map(Object.entries(pieceIds).map(([local, remote]) => [remote, Number(local)]));
       const remoteIds = Object.values(pieceIds);
 
-      const [{ data: ownRatings }, { data: dbSetlists }, { data: dbSetlistRatings }] = await Promise.all([
+      const [{ data: ownRatings }, { data: allPieceRatings }, { data: dbSetlists }, { data: dbSetlistRatings }, { data: dbProfiles }, { data: dbMemberships }, { data: dbAllowedEmails }] = await Promise.all([
         supabase.from("piece_ratings").select("piece_id, stars, skipped, comment").eq("user_id", session.user.id).in("piece_id", remoteIds),
+        supabase.from("piece_ratings").select("piece_id, user_id, stars, skipped, comment").in("piece_id", remoteIds),
         supabase.from("setlists").select("id, name, owner_id, state, setlist_items(piece_id, position)").eq("project_id", ACTIVE_PROJECT_ID),
         supabase.from("setlist_ratings").select("setlist_id, user_id, stars, comment"),
+        supabase.from("profiles").select("id, display_name, is_app_admin, last_seen_at"),
+        supabase.from("project_members").select("user_id, status").eq("project_id", ACTIVE_PROJECT_ID).eq("status", "active"),
+        currentProfile?.is_app_admin ? supabase.from("signup_allowed_emails").select("email, display_name") : Promise.resolve({ data: [] as { email: string; display_name: string | null }[] }),
       ]);
 
-      const ownerIds = [...new Set((dbSetlists ?? []).map((setlist) => setlist.owner_id))];
-      const { data: owners } = ownerIds.length
-        ? await supabase.from("profiles").select("id, display_name").in("id", ownerIds)
-        : { data: [] as { id: string; display_name: string }[] };
-      const ownerNames = new Map((owners ?? []).map((owner) => [owner.id, owner.display_name]));
+      const profileNames = new Map((dbProfiles ?? []).map((profile) => [profile.id, profile.display_name]));
       const allSetlistRatings = dbSetlistRatings ?? [];
 
       if (!active) return;
       setRemotePieceIds(pieceIds);
-      setPieceOverrides(Object.fromEntries(dbPieces.flatMap((piece) => {
+      const mappedPieces = dbPieces.flatMap((piece) => {
         const match = /^xlsx-(\d+)$/.exec(piece.import_key ?? "");
         if (!match) return [];
         const localId = Number(match[1]);
         const youtubeMatch = piece.sample_url?.match(/(?:youtu\.be\/|v=|embed\/)([A-Za-z0-9_-]{6,})/);
-        return [[localId, {
+        return [{
+          id: localId,
           title: piece.title, composer: piece.composer, durationSeconds: piece.duration_seconds,
           grade: Number(piece.grade), priceCents: piece.price_cents, owned: piece.owned,
           genres: piece.genres ?? [], sampleUrl: piece.sample_url, youtubeId: youtubeMatch?.[1] ?? null,
           purchaseUrl: piece.purchase_url, soloStatus: piece.solo_status, solos: piece.solos,
           source: piece.source, note: piece.note,
-        }]];
-      })));
+        } as Piece];
+      }).sort((a, b) => a.title.localeCompare(b.title, "de"));
+      setRemotePieces(mappedPieces);
+      setPieceOverrides({});
       setRatings(Object.fromEntries((ownRatings ?? []).flatMap((rating) => {
         const localId = localByRemote.get(rating.piece_id);
         return localId ? [[localId, { stars: rating.stars, skipped: rating.skipped, comment: rating.comment ?? "" }]] : [];
       })));
+      const grouped = new Map<number, { stars: number[]; comments: { author: string; text: string }[] }>();
+      for (const rating of allPieceRatings ?? []) {
+        const localId = localByRemote.get(rating.piece_id);
+        if (!localId) continue;
+        const item = grouped.get(localId) ?? { stars: [], comments: [] };
+        if (rating.stars) item.stars.push(rating.stars);
+        if (rating.comment?.trim()) item.comments.push({ author: profileNames.get(rating.user_id) ?? "Mitglied", text: rating.comment.trim() });
+        grouped.set(localId, item);
+      }
+      setGroupRatings(Object.fromEntries([...grouped].map(([id, item]) => [id, {
+        average: item.stars.length ? item.stars.reduce((sum, value) => sum + value, 0) / item.stars.length : 0,
+        count: item.stars.length,
+        comments: item.comments,
+      }])));
+      const activeMemberIds = new Set((dbMemberships ?? []).map((membership) => membership.user_id));
+      setMembers((dbProfiles ?? []).filter((profile) => activeMemberIds.has(profile.id)).map((profile) => ({
+        id: profile.id,
+        displayName: profile.display_name,
+        isAdmin: profile.is_app_admin,
+        lastSeenAt: profile.last_seen_at,
+      })));
+      setAllowedEmails((dbAllowedEmails ?? []).map((entry) => ({ email: String(entry.email), displayName: entry.display_name })));
       setSetlists((dbSetlists ?? []).map((setlist) => {
         const listRatings = allSetlistRatings.filter((rating) => rating.setlist_id === setlist.id);
         const stars = listRatings.map((rating) => rating.stars);
@@ -155,7 +189,7 @@ export default function Home() {
         return {
           id: setlist.id,
           name: setlist.name,
-          owner: ownerNames.get(setlist.owner_id) ?? "Mitglied",
+          owner: profileNames.get(setlist.owner_id) ?? "Mitglied",
           pieceIds: orderedItems.flatMap((item) => { const localId = localByRemote.get(item.piece_id); return localId ? [localId] : []; }),
           state: setlist.state as SetlistState,
           rating: stars.length ? stars.reduce((sum, value) => sum + value, 0) / stars.length : 0,
@@ -169,7 +203,7 @@ export default function Home() {
     return () => { active = false; };
   }, [session, supabase]);
 
-  const catalogue = useMemo(() => pieces.map((piece) => ({ ...piece, ...pieceOverrides[piece.id] })), [pieceOverrides]);
+  const catalogue = useMemo(() => (supabase ? remotePieces : pieces).map((piece) => ({ ...piece, ...pieceOverrides[piece.id] })), [pieceOverrides, remotePieces, supabase]);
   const activePiece = catalogue.find((piece) => piece.id === activePieceId) ?? null;
   const activeSetlist = setlists.find((setlist) => setlist.id === activeSetlistId) ?? null;
   const adminPiece = catalogue.find((piece) => piece.id === adminEditId) ?? null;
@@ -179,7 +213,7 @@ export default function Home() {
   const genres = ["Alle Genres", ...new Set(catalogue.flatMap((piece) => piece.genres))];
   const nextPiece = catalogue.find((piece) => !ratings[piece.id]);
   const email = session?.user.email?.toLocaleLowerCase("de") ?? "";
-  const displayName = session?.user.user_metadata?.display_name || (email ? email.split("@")[0].split(".")[0] : "Demo");
+  const displayName = profileDisplayName || session?.user.user_metadata?.display_name || (email ? email.split("@")[0].split(".")[0] : "Demo");
   const friendlyName = String(displayName).charAt(0).toLocaleUpperCase("de") + String(displayName).slice(1);
 
   const filteredPieces = useMemo(() => {
@@ -193,6 +227,14 @@ export default function Home() {
     if (supabase && session && remotePieceIds[pieceId]) {
       const { error } = await supabase.from("piece_ratings").upsert({ piece_id: remotePieceIds[pieceId], user_id: session.user.id, ...rating }, { onConflict: "piece_id,user_id" });
       if (error) { flash("Speichern fehlgeschlagen – bitte erneut versuchen"); return; }
+      const { data: refreshed } = await supabase.from("piece_ratings").select("user_id, stars, comment").eq("piece_id", remotePieceIds[pieceId]);
+      const stars = (refreshed ?? []).flatMap((item) => item.stars ? [item.stars] : []);
+      const memberNames = new Map(members.map((member) => [member.id, member.displayName]));
+      setGroupRatings((current) => ({ ...current, [pieceId]: {
+        average: stars.length ? stars.reduce((sum, value) => sum + value, 0) / stars.length : 0,
+        count: stars.length,
+        comments: (refreshed ?? []).flatMap((item) => item.comment?.trim() ? [{ author: memberNames.get(item.user_id) ?? "Mitglied", text: item.comment.trim() }] : []),
+      } }));
     }
     flash("Bewertung gespeichert");
   };
@@ -257,6 +299,32 @@ export default function Home() {
     }
     flash("Setlist-Bewertung gespeichert");
   };
+  const addAllowedEmail = async () => {
+    if (!supabase || !isAdmin) return;
+    const entered = window.prompt("Welche E-Mail-Adresse soll freigeschaltet werden?")?.trim().toLocaleLowerCase("de");
+    if (!entered) return;
+    if (!/^\S+@\S+\.\S+$/.test(entered)) { flash("Bitte eine gültige E-Mail-Adresse eingeben"); return; }
+    const { error } = await supabase.from("signup_allowed_emails").upsert({ email: entered }, { onConflict: "email" });
+    if (error) { flash("E-Mail konnte nicht freigeschaltet werden"); return; }
+    setAllowedEmails((current) => current.some((item) => item.email === entered) ? current : [...current, { email: entered, displayName: null }]);
+    flash("E-Mail freigeschaltet");
+  };
+  const removeAllowedEmail = async (emailToRemove: string) => {
+    if (!supabase || !isAdmin || !window.confirm(`${emailToRemove} von der Freigabeliste entfernen?`)) return;
+    const { error } = await supabase.from("signup_allowed_emails").delete().eq("email", emailToRemove);
+    if (error) { flash("Freigabe konnte nicht entfernt werden"); return; }
+    setAllowedEmails((current) => current.filter((item) => item.email !== emailToRemove));
+    flash("Freigabe entfernt");
+  };
+  const deleteMember = async (member: Member) => {
+    if (!supabase || !isAdmin || member.id === session?.user.id || !window.confirm(`${member.displayName} wirklich vollständig löschen?`)) return;
+    const { error } = await supabase.functions.invoke("admin-delete-user", { body: { userId: member.id } });
+    if (error) { flash("Nutzer konnte nicht gelöscht werden"); return; }
+    setMembers((current) => current.filter((item) => item.id !== member.id));
+    flash("Nutzer gelöscht");
+  };
+  const publishedSetlists = setlists.filter((item) => item.state !== "draft");
+  const finalist = setlists.find((item) => item.state === "final") ?? setlists.find((item) => item.state === "finalist");
   const navItems: { id: View; label: string; icon: typeof Music2 }[] = [
     { id: "home", label: "Übersicht", icon: BarChart3 }, { id: "pieces", label: "Stücke", icon: FileMusic }, { id: "setlists", label: "Setlists", icon: ListMusic }, ...(isAdmin ? [{ id: "admin" as View, label: "Admin", icon: Settings }] : []),
   ];
@@ -279,9 +347,9 @@ export default function Home() {
         <div className="page-heading home-heading"><div><span className="eyebrow"><Sparkles /> Jahreskonzert 2027</span><h1>Hallo {friendlyName}, was klingt gut?</h1><p>Noch {catalogue.length - completed} Stücke warten auf deine Ohren. Danach darfst du bei den anderen spicken.</p></div><button className="primary-button" onClick={() => setView("pieces")}><Headphones /> Weiter bewerten</button></div>
         <div className="dashboard-grid">
           <article className="hero-card progress-card"><div className="card-topline"><span>Dein Bewertungsfortschritt</span><strong>{progress}%</strong></div><div className="big-progress"><span style={{ width: `${progress}%` }} /></div><div className="progress-copy"><strong>{completed} von {catalogue.length}</strong><span>Noch {catalogue.length - completed} Hörproben – eine gute Playlistlänge.</span></div><button onClick={() => { setOnlyOpen(true); setView("pieces"); }}>Offene Stücke ansehen <ChevronRight /></button><div className="vinyl-art" aria-hidden="true"><span /><Music2 /></div></article>
-          <article className="metric-card"><div className="metric-icon purple"><Users /></div><div><span>Teilnehmer</span><strong>6</strong><small>5 zuletzt aktiv</small></div></article>
-          <article className="metric-card"><div className="metric-icon coral"><ListMusic /></div><div><span>Veröffentlichte Setlists</span><strong>2</strong><small>1 in der Finalrunde</small></div></article>
-          <article className="content-card finalist-card"><div className="section-title"><div><span className="eyebrow"><Trophy /> Finalrunde</span><h2>Tanzende Tuba</h2></div><span className="status-pill finalist">Finalist</span></div><p className="muted">von Demo-Mitglied 1 · 6 Stücke</p><TimeSignal duration={getMetrics(initialSetlists[0].pieceIds, catalogue).duration} /><div className="mini-stats"><span><Star fill="currentColor" /> 4,4 <small>(4/6)</small></span><span><MessageCircle /> 6 Kommentare</span></div><button className="secondary-button" onClick={() => setView("setlists")}>Jetzt bewerten <ChevronRight /></button></article>
+          <article className="metric-card"><div className="metric-icon purple"><Users /></div><div><span>Teilnehmer</span><strong>{supabase ? members.length : 6}</strong><small>{supabase ? "im aktuellen Projekt" : "5 zuletzt aktiv"}</small></div></article>
+          <article className="metric-card"><div className="metric-icon coral"><ListMusic /></div><div><span>Veröffentlichte Setlists</span><strong>{publishedSetlists.length}</strong><small>{setlists.filter((item) => item.state === "finalist" || item.state === "final").length} in der Finalrunde</small></div></article>
+          {finalist ? <article className="content-card finalist-card"><div className="section-title"><div><span className="eyebrow"><Trophy /> Finalrunde</span><h2>{finalist.name}</h2></div><span className="status-pill finalist">{finalist.state === "final" ? "Final" : "Finalist"}</span></div><p className="muted">von {finalist.owner} · {finalist.pieceIds.length} Stücke</p><TimeSignal duration={getMetrics(finalist.pieceIds, catalogue).duration} /><div className="mini-stats"><span><Star fill="currentColor" /> {finalist.rating.toFixed(1).replace(".", ",")} <small>({finalist.ratingCount}/{Math.max(members.length, 6)})</small></span><span><MessageCircle /> {finalist.comments} Kommentare</span></div><button className="secondary-button" onClick={() => setView("setlists")}>Jetzt bewerten <ChevronRight /></button></article> : <article className="content-card finalist-card"><div className="section-title"><div><span className="eyebrow"><Trophy /> Finalrunde</span><h2>Noch alles offen</h2></div></div><p className="muted">Sobald eine Setlist markiert ist, erscheint sie hier.</p><button className="secondary-button" onClick={() => setView("setlists")}>Setlists ansehen <ChevronRight /></button></article>}
           {nextPiece && <article className="content-card next-up-card"><div className="section-title"><div><span className="eyebrow"><Headphones /> Als Nächstes</span><h2>{nextPiece.title}</h2></div></div><p>{nextPiece.composer}</p><div className="piece-facts"><span><Clock3 /> {formatDuration(nextPiece.durationSeconds)}</span><span>Grade {nextPiece.grade}</span><span className="genre-chip">{nextPiece.genres[0] ?? "Genre offen"}</span></div><button className="play-button" onClick={() => { setActivePieceId(nextPiece.id); setView("pieces"); }}><Play fill="currentColor" /> Hörprobe starten</button></article>}
         </div>
       </div>}
@@ -290,24 +358,24 @@ export default function Home() {
         <div className="page-heading"><div><span className="eyebrow"><Headphones /> Stücke bewerten</span><h1>Deine Ohren, deine Meinung.</h1><p>Bewerte erst selbst – danach siehst du, was die anderen denken.</p></div><div className="compact-progress"><strong>{completed}/{catalogue.length}</strong><div><span style={{ width: `${progress}%` }} /></div><small>bearbeitet</small></div></div>
         <div className="filter-bar"><label className="search-field"><Search /><input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Titel oder Arrangeur suchen" /></label><label className="select-field"><Filter /><select value={genre} onChange={(event) => setGenre(event.target.value)}>{genres.map((item) => <option key={item}>{item}</option>)}</select><ChevronDown /></label><button className={onlyOpen ? "toggle active" : "toggle"} onClick={() => setOnlyOpen((current) => !current)}><span /> Nur offene</button></div>
         <div className="piece-list-head"><span>{filteredPieces.length} Stücke</span><span>Sortiert nach Titel</span></div>
-        <div className="piece-list">{filteredPieces.map((piece) => { const own = ratings[piece.id]; return <article className={`piece-row ${own ? "rated" : ""}`} key={piece.id}><button className="piece-play" onClick={() => setActivePieceId(piece.id)} disabled={!piece.youtubeId} aria-label={`Hörprobe ${piece.title}`}><Play fill="currentColor" /></button><button className="piece-main" onClick={() => setActivePieceId(piece.id)}><div className="piece-title-line"><h3>{piece.title}</h3>{piece.owned && <span className="owned-pill"><BadgeCheck /> Im Bestand</span>}</div><p>{piece.composer}</p><div className="piece-facts"><span><Clock3 /> {formatDuration(piece.durationSeconds)}</span><span>Grade {piece.grade}</span><span className="genre-chip">{piece.genres[0] ?? "Genre offen"}</span>{piece.soloStatus === "available" && <span className="solo-chip"><UserRound /> Solo</span>}</div></button><div className="rating-cell">{own ? <><Stars value={own.stars} small /><span className="average-note">Ø Gruppe 4,2</span></> : <><span className="locked-rating"><Lock /> Gruppe noch verborgen</span><button onClick={() => setActivePieceId(piece.id)}>Bewerten</button></>}</div><ChevronRight className="row-chevron" /></article>; })}</div>
+        <div className="piece-list">{filteredPieces.map((piece) => { const own = ratings[piece.id]; const group = groupRatings[piece.id]; return <article className={`piece-row ${own ? "rated" : ""}`} key={piece.id}><button className="piece-play" onClick={() => setActivePieceId(piece.id)} disabled={!piece.youtubeId} aria-label={`Hörprobe ${piece.title}`}><Play fill="currentColor" /></button><button className="piece-main" onClick={() => setActivePieceId(piece.id)}><div className="piece-title-line"><h3>{piece.title}</h3>{piece.owned && <span className="owned-pill"><BadgeCheck /> Im Bestand</span>}</div><p>{piece.composer}</p><div className="piece-facts"><span><Clock3 /> {formatDuration(piece.durationSeconds)}</span><span>Grade {piece.grade}</span><span className="genre-chip">{piece.genres[0] ?? "Genre offen"}</span>{piece.soloStatus === "available" && <span className="solo-chip"><UserRound /> Solo</span>}</div></button><div className="rating-cell">{own ? <><Stars value={own.stars} small /><span className="average-note">{group?.count ? `Ø Gruppe ${group.average.toFixed(1).replace(".", ",")}` : "Noch keine Gruppenwertung"}</span></> : <><span className="locked-rating"><Lock /> Gruppe noch verborgen</span><button onClick={() => setActivePieceId(piece.id)}>Bewerten</button></>}</div><ChevronRight className="row-chevron" /></article>; })}</div>
       </div>}
 
       {view === "setlists" && <div className="page setlists-page">
         <div className="page-heading"><div><span className="eyebrow"><ListMusic /> Setlists</span><h1>30 Minuten. Unendlich viele Möglichkeiten.</h1><p>Baue Varianten, veröffentliche deine Favoriten und finde gemeinsam das beste Programm.</p></div><button className="primary-button" onClick={createSetlist}><Plus /> Neue Setlist</button></div>
-        <div className="setlist-tabs"><button className="active">Alle <span>{setlists.length}</span></button><button>Finalrunde <span>1</span></button><button>Meine Entwürfe <span>{setlists.filter((item) => item.state === "draft").length}</span></button></div>
+        <div className="setlist-tabs"><button className="active">Alle <span>{setlists.length}</span></button><button>Finalrunde <span>{setlists.filter((item) => item.state === "finalist" || item.state === "final").length}</span></button><button>Meine Entwürfe <span>{setlists.filter((item) => item.state === "draft" && item.owner === friendlyName).length}</span></button></div>
         <div className="setlist-grid">{setlists.map((setlist) => { const metrics = getMetrics(setlist.pieceIds, catalogue); const ownSetlistRating = setlistRatings[String(setlist.id)]; return <article className={`setlist-card state-${setlist.state}`} key={setlist.id}><div className="setlist-card-head"><div>{setlist.state === "draft" ? <Lock /> : setlist.state === "finalist" || setlist.state === "final" ? <Trophy /> : <ListMusic />}</div><span className={`status-pill ${setlist.state}`}>{setlist.state === "draft" ? "Privater Entwurf" : setlist.state === "finalist" ? "Finalrunde" : setlist.state === "final" ? "Finale Setlist" : "Veröffentlicht"}</span><button className="icon-button"><MoreHorizontal /></button></div><h2>{setlist.name}</h2><p>von {setlist.owner} · {setlist.pieceIds.length} Stücke</p><TimeSignal duration={metrics.duration} compact /><div className="setlist-piece-preview">{metrics.selected.slice(0, 4).map((piece, index) => <span key={piece.id}><b>{index + 1}</b>{piece.title}<small>{formatDuration(piece.durationSeconds)}</small></span>)}{metrics.selected.length > 4 && <em>+{metrics.selected.length - 4} weitere</em>}</div><div className="genre-line">{metrics.genres.slice(0, 3).map((item) => <span className="genre-chip" key={item}>{item}</span>)}</div><div className="setlist-footer">{setlist.state === "draft" ? <button className="secondary-button" onClick={() => setBuilderId(setlist.id)}><Pencil /> Weiterbauen</button> : <button className="setlist-score score-button" onClick={() => setActiveSetlistId(setlist.id)}><Star fill="currentColor" /><strong>{setlist.rating.toFixed(1).replace(".", ",")}</strong><small>{ownSetlistRating ? `Du: ${ownSetlistRating.stars}/5` : `${setlist.ratingCount}/6 bewertet`}</small></button>}<button className="text-button" onClick={() => duplicateSetlist(setlist)}><Copy /> Duplizieren</button></div>{isAdmin && setlist.state !== "draft" && <div className="admin-setlist-actions"><span>Admin-Auswahl</span>{setlist.state !== "finalist" && setlist.state !== "final" && <button onClick={() => markSetlist(setlist.id, "finalist")}><Trophy /> Finalrunde</button>}{setlist.state === "finalist" && <button onClick={() => markSetlist(setlist.id, "final")}><BadgeCheck /> Als final festlegen</button>}{(setlist.state === "finalist" || setlist.state === "final") && <button onClick={() => markSetlist(setlist.id, "published")}><X /> Zurücksetzen</button>}</div>}</article>; })}</div>
       </div>}
 
       {view === "admin" && isAdmin && <div className="page admin-page">
         <div className="page-heading"><div><span className="eyebrow"><Settings /> Adminbereich</span><h1>Alles im Takt halten.</h1><p>Metadaten vervollständigen, Teilnehmer verwalten und den Auswahlprozess steuern.</p></div><button className="secondary-button"><FileMusic /> Excel importieren</button></div>
-        <div className="admin-metrics"><article><div className="metric-icon coral"><CircleHelp /></div><div><strong>{catalogue.filter((piece) => piece.soloStatus === "unknown").length}</strong><span>Soli noch offen</span></div></article><article><div className="metric-icon yellow"><Filter /></div><div><strong>{catalogue.filter((piece) => piece.genres.length === 0).length}</strong><span>Genres fehlen</span></div></article><article><div className="metric-icon purple"><Users /></div><div><strong>6</strong><span>Aktive Nutzer</span></div></article><article><div className="metric-icon green"><BadgeCheck /></div><div><strong>11</strong><span>Stücke im Bestand</span></div></article></div>
-        <div className="admin-columns"><article className="content-card admin-table-card"><div className="section-title"><div><span className="eyebrow">Datenqualität</span><h2>Offene Metadaten</h2></div><span className="status-pill draft">{catalogue.filter((piece) => piece.soloStatus === "unknown" || piece.genres.length === 0).length} Aufgaben</span></div><div className="admin-piece-list">{catalogue.filter((piece) => piece.soloStatus === "unknown" || piece.genres.length === 0).slice(0, 8).map((piece) => <button key={piece.id} onClick={() => setAdminEditId(piece.id)}><div><strong>{piece.title}</strong><span>{piece.composer}</span></div><div className="missing-tags">{piece.genres.length === 0 && <em>Genre fehlt</em>}{piece.soloStatus === "unknown" && <em>Soli offen</em>}<Pencil /></div></button>)}</div></article><article className="content-card member-card"><div className="section-title"><div><span className="eyebrow">Teilnehmer</span><h2>Wer ist dabei?</h2></div><button className="icon-button"><Plus /></button></div>{["Demo-Admin", "Demo-Mitglied 1", "Demo-Mitglied 2", "Demo-Mitglied 3", "Demo-Mitglied 4", "Gastmitglied"].map((name, index) => <div className="member-row" key={name}><div className={`avatar color-${index}`}>{name.split(" ").map((part) => part[0]).join("").slice(0, 2)}</div><div><strong>{name}</strong><span>{index === 0 ? "Administrator · gerade aktiv" : index === 5 ? "Freigabeliste · noch nie angemeldet" : `Zuletzt aktiv vor ${index} Tag${index === 1 ? "" : "en"}`}</span></div><button className="icon-button"><MoreHorizontal /></button></div>)}</article></div>
+        <div className="admin-metrics"><article><div className="metric-icon coral"><CircleHelp /></div><div><strong>{catalogue.filter((piece) => piece.soloStatus === "unknown").length}</strong><span>Soli noch offen</span></div></article><article><div className="metric-icon yellow"><Filter /></div><div><strong>{catalogue.filter((piece) => piece.genres.length === 0).length}</strong><span>Genres fehlen</span></div></article><article><div className="metric-icon purple"><Users /></div><div><strong>{members.length}</strong><span>Aktive Nutzer</span></div></article><article><div className="metric-icon green"><BadgeCheck /></div><div><strong>{catalogue.filter((piece) => piece.owned).length}</strong><span>Stücke im Bestand</span></div></article></div>
+        <div className="admin-columns"><article className="content-card admin-table-card"><div className="section-title"><div><span className="eyebrow">Datenqualität</span><h2>Offene Metadaten</h2></div><span className="status-pill draft">{catalogue.filter((piece) => piece.soloStatus === "unknown" || piece.genres.length === 0).length} Aufgaben</span></div><div className="admin-piece-list">{catalogue.filter((piece) => piece.soloStatus === "unknown" || piece.genres.length === 0).slice(0, 8).map((piece) => <button key={piece.id} onClick={() => setAdminEditId(piece.id)}><div><strong>{piece.title}</strong><span>{piece.composer}</span></div><div className="missing-tags">{piece.genres.length === 0 && <em>Genre fehlt</em>}{piece.soloStatus === "unknown" && <em>Soli offen</em>}<Pencil /></div></button>)}</div></article><article className="content-card member-card"><div className="section-title"><div><span className="eyebrow">Teilnehmer</span><h2>Wer ist dabei?</h2></div><button className="icon-button" onClick={addAllowedEmail} aria-label="E-Mail freigeben"><Plus /></button></div>{members.map((member, index) => <div className="member-row" key={member.id}><div className={`avatar color-${index}`}>{member.displayName.split(" ").map((part) => part[0]).join("").slice(0, 2).toLocaleUpperCase("de")}</div><div><strong>{member.displayName}</strong><span>{member.isAdmin ? "Administrator" : "Mitglied"} · {member.lastSeenAt ? `aktiv ${new Date(member.lastSeenAt).toLocaleDateString("de-DE")}` : "noch nie aktiv"}</span></div>{member.id !== session?.user.id && <button className="icon-button" aria-label={`${member.displayName} löschen`} onClick={() => void deleteMember(member)}><Trash2 /></button>}</div>)}{allowedEmails.filter((entry) => !members.some((member) => member.displayName === entry.displayName)).map((entry, index) => <div className="member-row" key={entry.email}><div className={`avatar color-${(members.length + index) % 6}`}>?</div><div><strong>{entry.displayName || entry.email}</strong><span>Freigabeliste · noch nie angemeldet</span></div><button className="icon-button" aria-label={`${entry.email} entfernen`} onClick={() => void removeAllowedEmail(entry.email)}><Trash2 /></button></div>)}</article></div>
       </div>}
     </section>
 
     <nav className="bottom-nav" aria-label="Mobile Navigation">{navItems.map((item) => { const Icon = item.icon; return <button key={item.id} className={view === item.id ? "active" : ""} onClick={() => setView(item.id)}><Icon /><span>{item.label}</span>{item.id === "pieces" && <i>{catalogue.length - completed}</i>}</button>; })}</nav>
-    {activePiece && <PieceDialog piece={activePiece} rating={ratings[activePiece.id]} onClose={() => setActivePieceId(null)} onSave={(rating) => { saveRating(activePiece.id, rating); setActivePieceId(null); }} />}
+    {activePiece && <PieceDialog piece={activePiece} rating={ratings[activePiece.id]} groupRating={groupRatings[activePiece.id]} onClose={() => setActivePieceId(null)} onSave={(rating) => { saveRating(activePiece.id, rating); setActivePieceId(null); }} />}
     {activeSetlist && <SetlistDialog catalogue={catalogue} setlist={activeSetlist} rating={setlistRatings[String(activeSetlist.id)]} onClose={() => setActiveSetlistId(null)} onSave={(rating) => { void saveSetlistRating(activeSetlist, rating); setActiveSetlistId(null); }} />}
     {builder && <BuilderDialog catalogue={catalogue} setlist={builder} onClose={() => setBuilderId(null)} onPatch={patchBuilder} onPublish={() => { patchBuilder({ state: "published" }); setBuilderId(null); flash("Setlist veröffentlicht – jetzt darf bewertet werden"); }} />}
     {adminPiece && <AdminPieceDialog piece={adminPiece} onClose={() => setAdminEditId(null)} onSave={(patch) => { setPieceOverrides((current) => ({ ...current, [adminPiece.id]: { ...current[adminPiece.id], ...patch } })); if (supabase && remotePieceIds[adminPiece.id]) void supabase.from("pieces").update({ genres: patch.genres, solo_status: patch.soloStatus, solos: patch.solos, duration_seconds: patch.durationSeconds, grade: patch.grade, price_cents: patch.priceCents, owned: patch.owned, source: patch.source, note: patch.note, updated_at: new Date().toISOString() }).eq("id", remotePieceIds[adminPiece.id]); setAdminEditId(null); flash("Metadaten gespeichert"); }} />}
@@ -339,12 +407,11 @@ function LoginScreen({ supabase }: { supabase: SupabaseClient }) {
   return <main className="auth-page"><section className="auth-card"><div className="auth-brand"><AppMark /><div><strong>Setlist-o-Mat</strong><span>Gemeinsam. Klingt besser.</span></div></div><div className="auth-art" aria-hidden="true"><Music2 /><span>♪</span><i>✦</i></div><div className="auth-copy"><span className="eyebrow"><Sparkles /> Jahreskonzert 2027</span><h1>{sent ? "Schau kurz ins Postfach." : "Reinhören. Bewerten. Programm bauen."}</h1><p>{sent ? `Wir haben einen Anmeldecode an ${email} geschickt.` : "Ohne Passwort: E-Mail eingeben, Code öffnen und schon bist du dabei."}</p>{!sent ? <form onSubmit={(event) => { event.preventDefault(); requestCode(); }}><label><span>E-Mail-Adresse</span><input autoComplete="email" inputMode="email" type="email" required value={email} onChange={(event) => setEmail(event.target.value)} placeholder="name@beispiel.de" /></label><button className="primary-button" disabled={busy || !email.trim()}>{busy ? "Wird gesendet …" : "Code per E-Mail senden"}<ChevronRight /></button></form> : <form onSubmit={(event) => { event.preventDefault(); verifyCode(); }}><label><span>Sechsstelliger Code</span><input autoComplete="one-time-code" inputMode="numeric" pattern="[0-9]{6}" maxLength={6} required value={code} onChange={(event) => setCode(event.target.value.replace(/\D/g, ""))} placeholder="123456" /></label><button className="primary-button" disabled={busy || code.length !== 6}>{busy ? "Wird geprüft …" : "Einloggen"}<ChevronRight /></button><button type="button" className="text-button" onClick={() => { setSent(false); setCode(""); setMessage(null); }}>Andere E-Mail verwenden</button></form>}{message && <div className="auth-message"><CircleHelp />{message}</div>}<div className="auth-hint"><BadgeCheck /><span><strong>@musikverein-verl.de</strong> ist automatisch freigeschaltet. Andere Adressen müssen auf der Freigabeliste stehen – im Zweifel kurz per WhatsApp melden.</span></div></div></section></main>;
 }
 
-function PieceDialog({ piece, rating, onClose, onSave }: { piece: Piece; rating?: Rating; onClose: () => void; onSave: (rating: Rating) => void }) {
+function PieceDialog({ piece, rating, groupRating, onClose, onSave }: { piece: Piece; rating?: Rating; groupRating?: GroupRating; onClose: () => void; onSave: (rating: Rating) => void }) {
   const [stars, setStars] = useState<number | null>(rating?.stars ?? null);
   const [skipped, setSkipped] = useState(rating?.skipped ?? false);
   const [comment, setComment] = useState(rating?.comment ?? "");
-  const average = 3.7 + ((piece.id * 7) % 12) / 10;
-  return <div className="dialog-backdrop" onMouseDown={(event) => event.target === event.currentTarget && onClose()}><section className="dialog piece-dialog" role="dialog" aria-modal="true" aria-label={`${piece.title} bewerten`}><button className="dialog-close" onClick={onClose}><X /></button><div className="dialog-kicker"><Headphones /> Hörprobe & Bewertung</div><h2>{piece.title}</h2><p className="dialog-subtitle">{piece.composer}</p><div className="dialog-facts"><span><Clock3 /> {formatDuration(piece.durationSeconds)}</span><span>Grade {piece.grade}</span>{piece.genres.map((item) => <span className="genre-chip" key={item}>{item}</span>)}{piece.owned && <span className="owned-pill"><BadgeCheck /> Im Bestand</span>}</div>{piece.youtubeId ? <div className="youtube-wrap"><iframe src={`https://www.youtube-nocookie.com/embed/${piece.youtubeId}?rel=0`} title={`Hörprobe ${piece.title}`} allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture" allowFullScreen /></div> : <div className="no-sample"><Headphones /><strong>Keine Hörprobe hinterlegt</strong><span>Du kannst das Stück trotzdem bewerten oder überspringen.</span></div>}<div className="rating-panel"><div className="rating-question"><span>Wie gut passt das Stück ins Konzert?</span><Stars value={skipped ? null : stars} onChange={(value) => { setSkipped(false); setStars(value); }} /></div><button className={skipped ? "skip-button active" : "skip-button"} onClick={() => { setSkipped(true); setStars(null); }}><CircleHelp /> Kann ich nicht beurteilen</button><label><span>Dein Kommentar <small>optional</small></span><textarea value={comment} onChange={(event) => setComment(event.target.value)} placeholder="Was spricht dafür oder dagegen? Soli, Wirkung, Besetzung …" /></label>{rating && <div className="group-peek"><div><Users /><span>Gruppe</span></div><strong>Ø {average.toFixed(1).replace(".", ",")}</strong><Stars value={Math.round(average)} small /><button>4 Kommentare lesen</button></div>}</div><div className="dialog-actions"><button className="text-button" onClick={onClose}>Abbrechen</button><button className="primary-button" disabled={!stars && !skipped} onClick={() => onSave({ stars, skipped, comment })}><Check /> Bewertung speichern</button></div></section></div>;
+  return <div className="dialog-backdrop" onMouseDown={(event) => event.target === event.currentTarget && onClose()}><section className="dialog piece-dialog" role="dialog" aria-modal="true" aria-label={`${piece.title} bewerten`}><button className="dialog-close" onClick={onClose}><X /></button><div className="dialog-kicker"><Headphones /> Hörprobe & Bewertung</div><h2>{piece.title}</h2><p className="dialog-subtitle">{piece.composer}</p><div className="dialog-facts"><span><Clock3 /> {formatDuration(piece.durationSeconds)}</span><span>Grade {piece.grade}</span>{piece.genres.map((item) => <span className="genre-chip" key={item}>{item}</span>)}{piece.owned && <span className="owned-pill"><BadgeCheck /> Im Bestand</span>}</div>{piece.youtubeId ? <div className="youtube-wrap"><iframe src={`https://www.youtube-nocookie.com/embed/${piece.youtubeId}?rel=0`} title={`Hörprobe ${piece.title}`} allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture" allowFullScreen /></div> : <div className="no-sample"><Headphones /><strong>Keine Hörprobe hinterlegt</strong><span>Du kannst das Stück trotzdem bewerten oder überspringen.</span></div>}<div className="rating-panel"><div className="rating-question"><span>Wie gut passt das Stück ins Konzert?</span><Stars value={skipped ? null : stars} onChange={(value) => { setSkipped(false); setStars(value); }} /></div><button className={skipped ? "skip-button active" : "skip-button"} onClick={() => { setSkipped(true); setStars(null); }}><CircleHelp /> Kann ich nicht beurteilen</button><label><span>Dein Kommentar <small>optional</small></span><textarea value={comment} onChange={(event) => setComment(event.target.value)} placeholder="Was spricht dafür oder dagegen? Soli, Wirkung, Besetzung …" /></label>{rating && groupRating?.count ? <div className="group-peek"><div><Users /><span>Gruppe · {groupRating.count} Bewertungen</span></div><strong>Ø {groupRating.average.toFixed(1).replace(".", ",")}</strong><Stars value={Math.round(groupRating.average)} small />{groupRating.comments.length > 0 && <details><summary>{groupRating.comments.length} Kommentare lesen</summary>{groupRating.comments.map((entry, index) => <p key={`${entry.author}-${index}`}><strong>{entry.author}:</strong> {entry.text}</p>)}</details>}</div> : rating && <div className="group-peek"><div><Users /><span>Noch keine weitere Gruppenbewertung</span></div></div>}</div><div className="dialog-actions"><button className="text-button" onClick={onClose}>Abbrechen</button><button className="primary-button" disabled={!stars && !skipped} onClick={() => onSave({ stars, skipped, comment })}><Check /> Bewertung speichern</button></div></section></div>;
 }
 
 function BuilderDialog({ catalogue, setlist, onClose, onPatch, onPublish }: { catalogue: Piece[]; setlist: Setlist; onClose: () => void; onPatch: (patch: Partial<Setlist>) => void; onPublish: () => void }) {

@@ -129,9 +129,18 @@ create table public.setlist_ratings (
 
 create index pieces_project_id_idx on public.pieces(project_id);
 create index piece_ratings_piece_id_idx on public.piece_ratings(piece_id);
+create index piece_ratings_user_id_idx on public.piece_ratings(user_id);
+create index project_members_user_id_idx on public.project_members(user_id);
+create index projects_created_by_idx on public.projects(created_by);
 create index setlists_project_state_idx on public.setlists(project_id, state);
+create index setlists_owner_id_idx on public.setlists(owner_id);
+create index setlists_derived_from_idx on public.setlists(derived_from);
 create index setlist_items_setlist_position_idx on public.setlist_items(setlist_id, position);
+create index setlist_items_piece_id_idx on public.setlist_items(piece_id);
 create index setlist_ratings_setlist_id_idx on public.setlist_ratings(setlist_id);
+create index setlist_ratings_user_id_idx on public.setlist_ratings(user_id);
+create index signup_allowed_emails_added_by_idx on public.signup_allowed_emails(added_by);
+create index signup_blocked_emails_blocked_by_idx on public.signup_blocked_emails(blocked_by);
 
 create or replace function private.is_app_admin()
 returns boolean
