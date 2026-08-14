@@ -57,6 +57,22 @@ function formatDuration(seconds: number) { return `${Math.floor(seconds / 60)}:$
 function formatMoney(cents: number) { return new Intl.NumberFormat("de-DE", { style: "currency", currency: "EUR", minimumFractionDigits: cents % 100 === 0 ? 0 : 2 }).format(cents / 100); }
 function formatPiecePrice(piece: Piece) { return piece.owned ? "Kaufpreis entfällt" : piece.priceCents > 0 ? `Preis ${formatMoney(piece.priceCents)}` : "Preis noch offen"; }
 function getYoutubeId(url: string | null) { return url?.match(/(?:youtu\.be\/|v=|embed\/)([A-Za-z0-9_-]{6,})/)?.[1] ?? null; }
+function isSupabaseAuthHash(hash: string) {
+  const params = new URLSearchParams(hash.replace(/^#/, ""));
+  return params.has("access_token") || params.has("refresh_token") || params.has("error") || params.has("error_code");
+}
+function friendlyAuthError(message: string, code?: string | null) {
+  const normalized = `${code ?? ""} ${message}`.toLocaleLowerCase("de");
+  if (normalized.includes("otp_expired") || normalized.includes("invalid or has expired") || normalized.includes("one-time token")) return "Dieser Anmeldelink ist abgelaufen oder wurde bereits verwendet. Bitte fordere eine neue Anmeldemail an und öffne nur den neuesten Link.";
+  if (normalized.includes("rate_limit") || normalized.includes("only request this after") || normalized.includes("429")) return "Du hast gerade schon eine Anmeldemail angefordert. Bitte warte kurz und versuche es dann erneut.";
+  if (normalized.includes("not allowed") || normalized.includes("signup_disabled")) return "Diese E-Mail-Adresse ist nicht freigeschaltet. Bitte melde dich kurz bei Fabian.";
+  return message || "Die Anmeldung ist fehlgeschlagen. Bitte fordere eine neue Anmeldemail an.";
+}
+function getAuthCallbackError(hash: string) {
+  const params = new URLSearchParams(hash.replace(/^#/, ""));
+  if (!params.has("error") && !params.has("error_code")) return null;
+  return friendlyAuthError(params.get("error_description")?.replace(/\+/g, " ") ?? "", params.get("error_code"));
+}
 function parseAppHash(hash: string): AppRoute {
   const [rawPath = "", rawQuery = ""] = hash.replace(/^#/, "").split("?");
   const segments = rawPath.split("/").filter(Boolean).map((segment) => { try { return decodeURIComponent(segment); } catch { return segment; } });
@@ -142,6 +158,7 @@ export default function Home() {
   const supabase = getSupabaseBrowserClient();
   const [session, setSession] = useState<Session | null>(null);
   const [authReady, setAuthReady] = useState(!supabase);
+  const [authMessage, setAuthMessage] = useState<string | null>(null);
   const [view, setView] = useState<View>("home");
   const [ratings, setRatings] = useState<Record<number, Rating>>(supabase ? {} : initialRatings);
   const [setlists, setSetlists] = useState<Setlist[]>(supabase ? [] : initialSetlists);
@@ -177,6 +194,13 @@ export default function Home() {
 
   useEffect(() => {
     const syncFromHash = () => {
+      const callbackError = getAuthCallbackError(window.location.hash);
+      if (callbackError) {
+        setAuthMessage(callbackError);
+        const storedHash = window.localStorage.getItem(RETURN_HASH_KEY);
+        const safeHash = storedHash?.startsWith("#") && !isSupabaseAuthHash(storedHash) ? storedHash : "#uebersicht";
+        window.history.replaceState(null, "", `${window.location.pathname}${window.location.search}${safeHash}`);
+      }
       const route = parseAppHash(window.location.hash);
       setView(route.view);
       setActivePieceId(route.pieceId);
@@ -208,10 +232,11 @@ export default function Home() {
   useEffect(() => {
     if (!supabase) return;
     let active = true;
-    supabase.auth.getSession().then(({ data }) => {
-      if (active) { setSession(data.session); setAuthReady(true); }
+    supabase.auth.getSession().then(({ data, error }) => {
+      if (active) { setSession(data.session); if (error) setAuthMessage(friendlyAuthError(error.message, error.code)); setAuthReady(true); }
     });
-    const { data: listener } = supabase.auth.onAuthStateChange((_event, nextSession) => {
+    const { data: listener } = supabase.auth.onAuthStateChange((event, nextSession) => {
+      if (event === "SIGNED_IN") setAuthMessage(null);
       setSession((current) => {
         if (current?.user.id !== nextSession?.user.id) {
           setProfileReady(false);
@@ -725,7 +750,7 @@ export default function Home() {
 
   if (!authReady || !maintenanceReady || (supabase && session && !profileReady)) return <div className="auth-loading"><AppMark /><strong>Setlist-o-Mat stimmt sich …</strong></div>;
   if (supabase && maintenance.enabled && (!session || !isAdmin)) return <MaintenanceScreen status={maintenance} signedIn={Boolean(session)} />;
-  if (supabase && !session) return <LoginScreen supabase={supabase} />;
+  if (supabase && !session) return <LoginScreen supabase={supabase} initialMessage={authMessage} />;
 
   return <main className="app-shell">
     <aside className="side-nav">
@@ -808,17 +833,19 @@ function MaintenanceScreen({ status, signedIn }: { status: MaintenanceStatus; si
   return <main className="auth-page maintenance-page"><section className="maintenance-screen"><div className="maintenance-screen-mark"><AppMark /><Construction /></div><span className="eyebrow"><Sparkles /> Kurze Generalpause</span><h1>Der Setlist-o-Mat wird gerade gestimmt.</h1><p>{status.message}</p><div className="maintenance-wait"><Activity /><span>{signedIn ? "Du bleibst angemeldet und gelangst automatisch zurück, sobald alles fertig ist." : "Die Anmeldung öffnet sich automatisch wieder, sobald alles fertig ist."}</span></div>{status.startedAt && <small>Wartung seit {new Date(status.startedAt).toLocaleTimeString("de-DE", { hour: "2-digit", minute: "2-digit" })} Uhr</small>}</section></main>;
 }
 
-function LoginScreen({ supabase }: { supabase: SupabaseClient }) {
+function LoginScreen({ supabase, initialMessage }: { supabase: SupabaseClient; initialMessage: string | null }) {
   const [email, setEmail] = useState("");
   const [code, setCode] = useState("");
   const [sent, setSent] = useState(false);
   const [busy, setBusy] = useState(false);
-  const [message, setMessage] = useState<string | null>(null);
+  const [message, setMessage] = useState<string | null>(initialMessage);
 
   const requestCode = async () => {
     setBusy(true); setMessage(null);
     const redirectUrl = new URL(window.location.href);
-    const returnHash = window.location.hash || "#uebersicht";
+    const currentHash = window.location.hash;
+    const storedHash = window.localStorage.getItem(RETURN_HASH_KEY);
+    const returnHash = currentHash && !isSupabaseAuthHash(currentHash) ? currentHash : storedHash && !isSupabaseAuthHash(storedHash) ? storedHash : "#uebersicht";
     window.localStorage.setItem(RETURN_HASH_KEY, returnHash);
     redirectUrl.search = "";
     redirectUrl.hash = "";
@@ -828,14 +855,14 @@ function LoginScreen({ supabase }: { supabase: SupabaseClient }) {
       options: { shouldCreateUser: true, emailRedirectTo: redirectUrl.toString() },
     });
     setBusy(false);
-    if (error) { window.localStorage.removeItem(RETURN_HASH_KEY); setMessage(error.message); return; }
+    if (error) { window.localStorage.removeItem(RETURN_HASH_KEY); setMessage(friendlyAuthError(error.message, error.code)); return; }
     setSent(true);
   };
   const verifyCode = async () => {
     setBusy(true); setMessage(null);
     const { error } = await supabase.auth.verifyOtp({ email: email.trim(), token: code.trim(), type: "email" });
     setBusy(false);
-    if (error) setMessage("Der Code ist ungültig oder abgelaufen. Bitte fordere einen neuen an.");
+    if (error) setMessage(friendlyAuthError(error.message, error.code));
   };
 
   return <main className="auth-page"><section className="auth-card"><div className="auth-brand"><AppMark /><div><strong>Setlist-o-Mat</strong><span>Gemeinsam. Klingt besser.</span></div></div><div className="auth-art" aria-hidden="true"><Music2 /><span>♪</span><i>✦</i></div><div className="auth-copy"><span className="eyebrow"><Sparkles /> Jahreskonzert 2027</span><h1>{sent ? "Schau kurz ins Postfach." : "Reinhören. Bewerten. Programm bauen."}</h1><p>{sent ? `Wir haben einen Anmeldelink an ${email} geschickt. Öffne ihn direkt – falls die Mail stattdessen einen sechsstelligen Code enthält, kannst du ihn hier eingeben.` : "Ohne Passwort: E-Mail eingeben und den Anmeldelink oder Code aus der Mail verwenden."}</p>{!sent ? <form onSubmit={(event) => { event.preventDefault(); requestCode(); }}><label><span>E-Mail-Adresse</span><input autoComplete="email" inputMode="email" type="email" required value={email} onChange={(event) => setEmail(event.target.value)} placeholder="name@beispiel.de" /></label><button className="primary-button" disabled={busy || !email.trim()}>{busy ? "Wird gesendet …" : "Anmeldemail senden"}<ChevronRight /></button></form> : <form onSubmit={(event) => { event.preventDefault(); verifyCode(); }}><label><span>Sechsstelliger Code <small>falls in der Mail enthalten</small></span><input autoComplete="one-time-code" inputMode="numeric" pattern="[0-9]{6}" maxLength={6} value={code} onChange={(event) => setCode(event.target.value.replace(/\D/g, ""))} placeholder="123456" /></label><button className="primary-button" disabled={busy || code.length !== 6}>{busy ? "Wird geprüft …" : "Code verwenden"}<ChevronRight /></button><button type="button" className="text-button" onClick={() => { setSent(false); setCode(""); setMessage(null); }}>Andere E-Mail verwenden</button></form>}{message && <div className="auth-message"><CircleHelp />{message}</div>}<div className="auth-hint"><BadgeCheck /><span><strong>@musikverein-verl.de</strong> ist automatisch freigeschaltet. Andere Adressen müssen auf der Freigabeliste stehen – im Zweifel kurz per WhatsApp melden.</span></div></div></section></main>;
