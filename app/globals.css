@@ -81,6 +81,7 @@ svg { width: 20px; height: 20px; stroke-width: 2; }
 .secondary-button { background: var(--purple-soft); color: var(--purple-dark); }
 .secondary-button:hover { background: #e2d8ff; }
 .text-button { border: 0; background: transparent; color: var(--purple); display: inline-flex; align-items: center; gap: 7px; font-weight: 750; font-size: 12px; cursor: pointer; padding: 8px; }
+.text-button.danger-button { color: var(--red); }.text-button.danger-button:hover { background: var(--red-soft); border-radius: 9px; }
 .text-button svg, .primary-button svg, .secondary-button svg, .play-button svg { width: 17px; height: 17px; }
 .icon-button { width: 36px; height: 36px; border-radius: 10px; border: 0; background: transparent; display: grid; place-items: center; cursor: pointer; }
 .icon-button:hover { background: rgba(91,59,196,.08); }
