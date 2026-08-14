@@ -23,6 +23,17 @@ create table public.profiles (
   updated_at timestamptz not null default now()
 );
 
+create table public.app_settings (
+  id text primary key check (id = 'global'),
+  maintenance_mode boolean not null default false,
+  maintenance_message text not null default 'Der Setlist-o-Mat wird gerade gestimmt. Gleich geht es weiter!',
+  maintenance_started_at timestamptz,
+  maintenance_started_by uuid references public.profiles(id) on delete set null,
+  updated_at timestamptz not null default now()
+);
+
+insert into public.app_settings (id) values ('global');
+
 create table public.signup_allowed_emails (
   email extensions.citext primary key,
   display_name text,
@@ -129,6 +140,7 @@ create table public.setlist_ratings (
 );
 
 create index pieces_project_id_idx on public.pieces(project_id);
+create index app_settings_maintenance_started_by_idx on public.app_settings(maintenance_started_by);
 create index piece_ratings_piece_id_idx on public.piece_ratings(piece_id);
 create index piece_ratings_user_id_idx on public.piece_ratings(user_id);
 create index project_members_user_id_idx on public.project_members(user_id);
@@ -311,6 +323,7 @@ create trigger on_auth_user_created
   for each row execute function private.handle_new_user();
 
 alter table public.profiles enable row level security;
+alter table public.app_settings enable row level security;
 alter table public.signup_allowed_emails enable row level security;
 alter table public.signup_blocked_emails enable row level security;
 alter table public.projects enable row level security;
@@ -342,6 +355,14 @@ with check (id = (select auth.uid()) and is_app_admin = private.is_app_admin());
 
 create policy "app admins manage profiles"
 on public.profiles for all to authenticated
+using (private.is_app_admin()) with check (private.is_app_admin());
+
+create policy "everyone reads maintenance status"
+on public.app_settings for select to anon, authenticated
+using (true);
+
+create policy "app admins update maintenance status"
+on public.app_settings for update to authenticated
 using (private.is_app_admin()) with check (private.is_app_admin());
 
 create policy "app admins manage allowlist"
@@ -497,3 +518,5 @@ using (user_id = (select auth.uid()));
 grant usage on schema public to authenticated;
 grant select, insert, update, delete on all tables in schema public to authenticated;
 alter default privileges in schema public grant select, insert, update, delete on tables to authenticated;
+grant usage on schema public to anon;
+grant select on public.app_settings to anon;
