@@ -1,0 +1,5 @@
+[functions.admin-delete-user]
+# The function validates the bearer token itself with auth.getUser(), then checks
+# is_app_admin before it creates a service-role client. Keeping gateway JWT
+# verification off also supports projects using Supabase's newer signing keys.
+verify_jwt = false
