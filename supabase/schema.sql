@@ -139,6 +139,82 @@ create table public.setlist_ratings (
   primary key (setlist_id, user_id)
 );
 
+-- Save the complete state of an own draft in one transaction. The UI may send
+-- several rapid changes; each accepted call either persists the whole snapshot
+-- or leaves the previous database state untouched.
+create or replace function public.save_own_setlist_draft(
+  requested_setlist_id uuid,
+  requested_name text,
+  requested_piece_ids uuid[],
+  requested_publish boolean default false
+)
+returns void
+language plpgsql
+security definer
+set search_path = ''
+as $$
+declare
+  target_project_id uuid;
+  normalized_piece_ids uuid[] := coalesce(requested_piece_ids, array[]::uuid[]);
+begin
+  if auth.uid() is null then
+    raise exception 'Anmeldung erforderlich.';
+  end if;
+
+  if length(trim(coalesce(requested_name, ''))) not between 1 and 120 then
+    raise exception 'Der Setlist-Name muss zwischen 1 und 120 Zeichen lang sein.';
+  end if;
+
+  select project_id into target_project_id
+  from public.setlists
+  where id = requested_setlist_id
+    and owner_id = auth.uid()
+    and state = 'draft'
+  for update;
+
+  if not found then
+    raise exception 'Der Entwurf wurde nicht gefunden oder ist bereits veröffentlicht.';
+  end if;
+
+  if cardinality(normalized_piece_ids) <> (
+    select count(distinct piece_id)
+    from unnest(normalized_piece_ids) as item(piece_id)
+  ) then
+    raise exception 'Ein Stück darf nur einmal in einer Setlist vorkommen.';
+  end if;
+
+  if exists (
+    select 1
+    from unnest(normalized_piece_ids) as item(requested_piece_id)
+    where not exists (
+      select 1
+      from public.pieces
+      where id = requested_piece_id
+        and project_id = target_project_id
+        and archived = false
+    )
+  ) then
+    raise exception 'Mindestens ein Stück gehört nicht zu diesem Projekt oder ist archiviert.';
+  end if;
+
+  delete from public.setlist_items where setlist_id = requested_setlist_id;
+
+  insert into public.setlist_items (setlist_id, piece_id, position)
+  select requested_setlist_id, piece_id, position::integer
+  from unnest(normalized_piece_ids) with ordinality as item(piece_id, position);
+
+  update public.setlists
+  set name = trim(requested_name),
+      state = case when requested_publish then 'published'::public.setlist_state else 'draft'::public.setlist_state end,
+      published_at = case when requested_publish then now() else null end,
+      updated_at = now()
+  where id = requested_setlist_id;
+end;
+$$;
+
+revoke all on function public.save_own_setlist_draft(uuid, text, uuid[], boolean) from public;
+grant execute on function public.save_own_setlist_draft(uuid, text, uuid[], boolean) to authenticated;
+
 create index pieces_project_id_idx on public.pieces(project_id);
 create index app_settings_maintenance_started_by_idx on public.app_settings(maintenance_started_by);
 create index piece_ratings_piece_id_idx on public.piece_ratings(piece_id);
