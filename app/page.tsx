@@ -23,6 +23,7 @@ type Rating = { stars: number | null; skipped: boolean; comment: string };
 type View = "home" | "pieces" | "setlists" | "admin";
 type SetlistState = "draft" | "published" | "finalist" | "final";
 type SetlistFilter = "all" | "finalists" | "mine";
+type PieceSort = "title" | "own-desc" | "group-desc";
 type SetlistReview = { userId: string; author: string; stars: number; comment: string };
 type Setlist = { id: number | string; name: string; ownerId: string | null; owner: string; pieceIds: number[]; state: SetlistState; rating: number; ratingCount: number; comments: number; reviews: SetlistReview[] };
 type SetlistRating = { stars: number; comment: string };
@@ -33,7 +34,7 @@ type AdminPiecePatch = Pick<Piece, "title" | "composer" | "genres" | "sampleUrl"
 type MaintenanceStatus = { enabled: boolean; message: string; startedAt: string | null };
 type SetlistSaveState = "idle" | "saving" | "saved" | "error";
 type PendingSetlistSave = { setlistId: string; name: string; pieceIds: string[]; publish: boolean };
-type AppRoute = { view: View; pieceId: number | null; setlistId: number | string | null; editSetlist: boolean; search: string; genre: string; onlyOpen: boolean; setlistFilter: SetlistFilter };
+type AppRoute = { view: View; pieceId: number | null; setlistId: number | string | null; editSetlist: boolean; search: string; genre: string; onlyOpen: boolean; pieceSort: PieceSort; setlistFilter: SetlistFilter };
 type YouTubePlayer = {
   cuePlaylist: (playlist: string[], index?: number, startSeconds?: number) => void;
   getPlaylistIndex: () => number;
@@ -122,20 +123,23 @@ function getAuthCallbackError(hash: string) {
   if (!params.has("error") && !params.has("error_code")) return null;
   return friendlyAuthError(params.get("error_description")?.replace(/\+/g, " ") ?? "", params.get("error_code"));
 }
+function parsePieceSort(value: string | null): PieceSort {
+  return value === "own-desc" || value === "group-desc" ? value : "title";
+}
 function parseAppHash(hash: string): AppRoute {
   const [rawPath = "", rawQuery = ""] = hash.replace(/^#/, "").split("?");
   const segments = rawPath.split("/").filter(Boolean).map((segment) => { try { return decodeURIComponent(segment); } catch { return segment; } });
   const params = new URLSearchParams(rawQuery);
   const base = segments[0];
-  if (base === "stuecke") return { view: "pieces", pieceId: /^\d+$/.test(segments[1] ?? "") ? Number(segments[1]) : null, setlistId: null, editSetlist: false, search: params.get("q") ?? "", genre: params.get("genre") ?? "Alle Genres", onlyOpen: params.get("offen") === "1", setlistFilter: "all" };
+  if (base === "stuecke") return { view: "pieces", pieceId: /^\d+$/.test(segments[1] ?? "") ? Number(segments[1]) : null, setlistId: null, editSetlist: false, search: params.get("q") ?? "", genre: params.get("genre") ?? "Alle Genres", onlyOpen: params.get("offen") === "1", pieceSort: parsePieceSort(params.get("sort")), setlistFilter: "all" };
   if (base === "setlists") {
     const rawId = segments[1];
     const setlistId = rawId ? (/^\d+$/.test(rawId) ? Number(rawId) : rawId) : null;
     const filter = params.get("filter");
-    return { view: "setlists", pieceId: null, setlistId, editSetlist: segments[2] === "bearbeiten", search: "", genre: "Alle Genres", onlyOpen: false, setlistFilter: filter === "finalists" || filter === "mine" ? filter : "all" };
+    return { view: "setlists", pieceId: null, setlistId, editSetlist: segments[2] === "bearbeiten", search: "", genre: "Alle Genres", onlyOpen: false, pieceSort: "title", setlistFilter: filter === "finalists" || filter === "mine" ? filter : "all" };
   }
-  if (base === "admin") return { view: "admin", pieceId: null, setlistId: null, editSetlist: false, search: "", genre: "Alle Genres", onlyOpen: false, setlistFilter: "all" };
-  return { view: "home", pieceId: null, setlistId: null, editSetlist: false, search: "", genre: "Alle Genres", onlyOpen: false, setlistFilter: "all" };
+  if (base === "admin") return { view: "admin", pieceId: null, setlistId: null, editSetlist: false, search: "", genre: "Alle Genres", onlyOpen: false, pieceSort: "title", setlistFilter: "all" };
+  return { view: "home", pieceId: null, setlistId: null, editSetlist: false, search: "", genre: "Alle Genres", onlyOpen: false, pieceSort: "title", setlistFilter: "all" };
 }
 function writeAppHash(hash: string, replace = false) {
   const nextHash = hash.startsWith("#") ? hash : `#${hash}`;
@@ -145,11 +149,12 @@ function writeAppHash(hash: string, replace = false) {
     window.dispatchEvent(new HashChangeEvent("hashchange"));
   } else window.location.hash = nextHash;
 }
-function piecesHash(search: string, genre: string, onlyOpen: boolean) {
+function piecesHash(search: string, genre: string, onlyOpen: boolean, sort: PieceSort = "title") {
   const params = new URLSearchParams();
   if (search.trim()) params.set("q", search.trim());
   if (genre !== "Alle Genres") params.set("genre", genre);
   if (onlyOpen) params.set("offen", "1");
+  if (sort !== "title") params.set("sort", sort);
   return `stuecke${params.size ? `?${params.toString()}` : ""}`;
 }
 function setlistsHash(filter: SetlistFilter) { return `setlists${filter === "all" ? "" : `?filter=${filter}`}`; }
@@ -230,6 +235,7 @@ export default function Home() {
   const [search, setSearch] = useState("");
   const [genre, setGenre] = useState("Alle Genres");
   const [onlyOpen, setOnlyOpen] = useState(false);
+  const [pieceSort, setPieceSort] = useState<PieceSort>("title");
   const [adminEditId, setAdminEditId] = useState<number | null>(null);
   const [adminPieceSearch, setAdminPieceSearch] = useState("");
   const [adminOnlyIncomplete, setAdminOnlyIncomplete] = useState(false);
@@ -257,7 +263,7 @@ export default function Home() {
       setActivePieceId(route.pieceId);
       setActiveSetlistId(route.setlistId && !route.editSetlist ? route.setlistId : null);
       setBuilderId(route.setlistId && route.editSetlist ? route.setlistId : null);
-      if (route.view === "pieces") { setSearch(route.search); setGenre(route.genre); setOnlyOpen(route.onlyOpen); }
+      if (route.view === "pieces") { setSearch(route.search); setGenre(route.genre); setOnlyOpen(route.onlyOpen); setPieceSort(route.pieceSort); }
       if (route.view === "setlists") setSetlistFilter(route.setlistFilter);
     };
     if (!window.location.hash) writeAppHash("uebersicht", true);
@@ -267,8 +273,8 @@ export default function Home() {
   }, []);
 
   useEffect(() => {
-    if (view === "pieces" && activePieceId === null) writeAppHash(piecesHash(search, genre, onlyOpen), true);
-  }, [activePieceId, genre, onlyOpen, search, view]);
+    if (view === "pieces" && activePieceId === null) writeAppHash(piecesHash(search, genre, onlyOpen, pieceSort), true);
+  }, [activePieceId, genre, onlyOpen, pieceSort, search, view]);
 
   useEffect(() => {
     if (view === "setlists" && activeSetlistId === null && builderId === null) writeAppHash(setlistsHash(setlistFilter), true);
@@ -528,16 +534,32 @@ export default function Home() {
 
   const filteredPieces = useMemo(() => {
     const query = search.trim().toLocaleLowerCase("de");
-    return catalogue.filter((piece) => (!query || `${piece.title} ${piece.composer}`.toLocaleLowerCase("de").includes(query)) && (genre === "Alle Genres" || piece.genres.includes(genre)) && (!onlyOpen || !ratings[piece.id]));
-  }, [catalogue, genre, onlyOpen, ratings, search]);
+    const result = catalogue.filter((piece) => (!query || `${piece.title} ${piece.composer}`.toLocaleLowerCase("de").includes(query)) && (genre === "Alle Genres" || piece.genres.includes(genre)) && (!onlyOpen || !ratings[piece.id]));
+    const byTitle = (a: Piece, b: Piece) => a.title.localeCompare(b.title, "de");
+    if (pieceSort === "own-desc") return result.sort((a, b) => {
+      const ownA = ratings[a.id];
+      const ownB = ratings[b.id];
+      const scoreA = ownA ? (ownA.skipped ? -1 : ownA.stars ?? -1) : -2;
+      const scoreB = ownB ? (ownB.skipped ? -1 : ownB.stars ?? -1) : -2;
+      return scoreB - scoreA || byTitle(a, b);
+    });
+    if (pieceSort === "group-desc") return result.sort((a, b) => {
+      const visibleA = Boolean(ratings[a.id] && groupRatings[a.id]?.count);
+      const visibleB = Boolean(ratings[b.id] && groupRatings[b.id]?.count);
+      if (visibleA !== visibleB) return Number(visibleB) - Number(visibleA);
+      if (visibleA && visibleB) return groupRatings[b.id].average - groupRatings[a.id].average || byTitle(a, b);
+      return byTitle(a, b);
+    });
+    return result.sort(byTitle);
+  }, [catalogue, genre, groupRatings, onlyOpen, pieceSort, ratings, search]);
   const hasActivePieceFilters = Boolean(search.trim()) || genre !== "Alle Genres" || onlyOpen;
   const clearPieceFilters = () => { setSearch(""); setGenre("Alle Genres"); setOnlyOpen(false); };
   const navigateToView = (nextView: View) => {
     setView(nextView); setActivePieceId(null); setActiveSetlistId(null); setBuilderId(null);
-    writeAppHash(nextView === "home" ? "uebersicht" : nextView === "pieces" ? piecesHash(search, genre, onlyOpen) : nextView === "setlists" ? setlistsHash(setlistFilter) : "admin");
+    writeAppHash(nextView === "home" ? "uebersicht" : nextView === "pieces" ? piecesHash(search, genre, onlyOpen, pieceSort) : nextView === "setlists" ? setlistsHash(setlistFilter) : "admin");
   };
   const openPiece = (pieceId: number) => { setView("pieces"); setActivePieceId(pieceId); setActiveSetlistId(null); setBuilderId(null); writeAppHash(`stuecke/${pieceId}`); };
-  const closePiece = () => { setActivePieceId(null); writeAppHash(piecesHash(search, genre, onlyOpen), true); };
+  const closePiece = () => { setActivePieceId(null); writeAppHash(piecesHash(search, genre, onlyOpen, pieceSort), true); };
   const openSetlist = (setlistId: number | string) => { setView("setlists"); setActiveSetlistId(setlistId); setActivePieceId(null); setBuilderId(null); writeAppHash(`setlists/${encodeURIComponent(String(setlistId))}`); };
   const closeSetlist = () => { setActiveSetlistId(null); writeAppHash(setlistsHash(setlistFilter), true); };
   const openBuilder = (setlistId: number | string) => { setView("setlists"); setSetlistSaveState("saved"); setBuilderId(setlistId); setActivePieceId(null); setActiveSetlistId(null); writeAppHash(`setlists/${encodeURIComponent(String(setlistId))}/bearbeiten`); };
@@ -861,7 +883,7 @@ export default function Home() {
       {view === "home" && <div className="page dashboard-page">
         <div className="page-heading home-heading"><div><span className="eyebrow"><Sparkles /> Jahreskonzert 2027</span><h1>Hallo {friendlyName}, was klingt gut?</h1><p>Noch {catalogue.length - completed} Stücke warten auf deine Ohren. Danach darfst du bei den anderen spicken.</p></div><button className="primary-button" onClick={() => navigateToView("pieces")}><Headphones /> Weiter bewerten</button></div>
         <div className="dashboard-grid">
-          <article className="hero-card progress-card"><div className="card-topline"><span>Dein Bewertungsfortschritt</span><strong>{progress}%</strong></div><div className="big-progress"><span style={{ width: `${progress}%` }} /></div><div className="progress-copy"><strong>{completed} von {catalogue.length}</strong><span>Noch {catalogue.length - completed} Hörproben – eine gute Playlistlänge.</span></div><button onClick={() => { setOnlyOpen(true); setView("pieces"); writeAppHash(piecesHash(search, genre, true)); }}>Offene Stücke ansehen <ChevronRight /></button><div className="vinyl-art" aria-hidden="true"><span /><Music2 /></div></article>
+          <article className="hero-card progress-card"><div className="card-topline"><span>Dein Bewertungsfortschritt</span><strong>{progress}%</strong></div><div className="big-progress"><span style={{ width: `${progress}%` }} /></div><div className="progress-copy"><strong>{completed} von {catalogue.length}</strong><span>Noch {catalogue.length - completed} Hörproben – eine gute Playlistlänge.</span></div><button onClick={() => { setOnlyOpen(true); setView("pieces"); writeAppHash(piecesHash(search, genre, true, pieceSort)); }}>Offene Stücke ansehen <ChevronRight /></button><div className="vinyl-art" aria-hidden="true"><span /><Music2 /></div></article>
           <article className="metric-card"><div className="metric-icon purple"><Users /></div><div><span>Teilnehmer</span><strong>{supabase ? members.length : 6}</strong><small>{supabase ? "im aktuellen Projekt" : "5 zuletzt aktiv"}</small></div></article>
           <article className="metric-card"><div className="metric-icon coral"><ListMusic /></div><div><span>Veröffentlichte Setlists</span><strong>{publishedSetlists.length}</strong><small>{setlists.filter((item) => item.state === "finalist" || item.state === "final").length} in der Finalrunde</small></div></article>
           {finalist ? <article className="content-card finalist-card"><div className="section-title"><div><span className="eyebrow"><Trophy /> Finalrunde</span><h2>{finalist.name}</h2></div><span className="status-pill finalist">{finalist.state === "final" ? "Final" : "Finalist"}</span></div><p className="muted">von {finalist.owner} · {finalist.pieceIds.length} Stücke</p><TimeSignal duration={getMetrics(finalist.pieceIds, catalogue).duration} /><div className="mini-stats"><span><Star fill="currentColor" /> {finalist.rating.toFixed(1).replace(".", ",")} <small>({finalist.ratingCount}/{Math.max(members.length, 6)})</small></span><span><MessageCircle /> {finalist.comments} Kommentare</span></div><button className="secondary-button" onClick={() => openSetlist(finalist.id)}>Jetzt bewerten <ChevronRight /></button></article> : <article className="content-card finalist-card"><div className="section-title"><div><span className="eyebrow"><Trophy /> Finalrunde</span><h2>Noch alles offen</h2></div></div><p className="muted">Sobald eine Setlist markiert ist, erscheint sie hier.</p><button className="secondary-button" onClick={() => navigateToView("setlists")}>Setlists ansehen <ChevronRight /></button></article>}
@@ -871,8 +893,8 @@ export default function Home() {
 
       {view === "pieces" && <div className="page pieces-page">
         <div className="page-heading"><div><span className="eyebrow"><Headphones /> Stücke bewerten</span><h1>Deine Ohren, deine Meinung.</h1><p>Bewerte erst selbst – danach siehst du, was die anderen denken.</p></div><div className="compact-progress"><strong>{completed}/{catalogue.length}</strong><div><span style={{ width: `${progress}%` }} /></div><small>bearbeitet</small></div></div>
-        <div className="filter-bar"><div className="search-field" role="search"><Search /><input aria-label="Titel oder Arrangeur suchen" value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Titel oder Arrangeur suchen" />{search && <button className="clear-search-button" onClick={() => setSearch("")} aria-label="Suchtext löschen"><X /></button>}</div><label className="select-field"><Filter /><select value={genre} onChange={(event) => setGenre(event.target.value)}>{genres.map((item) => <option key={item}>{item}</option>)}</select><ChevronDown /></label><button className={onlyOpen ? "toggle active" : "toggle"} aria-pressed={onlyOpen} onClick={() => setOnlyOpen((current) => !current)}><span /> Nur offene</button>{hasActivePieceFilters && <button className="clear-filters" onClick={clearPieceFilters}><X /> Filter löschen</button>}</div>
-        <div className="piece-list-head"><span>{filteredPieces.length} Stücke</span><span>Sortiert nach Titel</span></div>
+        <div className="filter-bar"><div className="search-field" role="search"><Search /><input aria-label="Titel oder Arrangeur suchen" value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Titel oder Arrangeur suchen" />{search && <button className="clear-search-button" onClick={() => setSearch("")} aria-label="Suchtext löschen"><X /></button>}</div><label className="select-field"><Filter /><select aria-label="Genre filtern" value={genre} onChange={(event) => setGenre(event.target.value)}>{genres.map((item) => <option key={item}>{item}</option>)}</select><ChevronDown /></label><label className="select-field sort-field"><BarChart3 /><select aria-label="Stücke sortieren" value={pieceSort} onChange={(event) => setPieceSort(event.target.value as PieceSort)}><option value="title">Titel A–Z</option><option value="own-desc">Meine Bewertung</option><option value="group-desc">Gruppenbewertung</option></select><ChevronDown /></label><button className={onlyOpen ? "toggle active" : "toggle"} aria-pressed={onlyOpen} onClick={() => setOnlyOpen((current) => !current)}><span /> Nur offene</button>{hasActivePieceFilters && <button className="clear-filters" onClick={clearPieceFilters}><X /> Filter löschen</button>}</div>
+        <div className="piece-list-head"><span>{filteredPieces.length} Stücke</span><span>{pieceSort === "title" ? "Titel A–Z" : pieceSort === "own-desc" ? "Meine Bewertung · höchste zuerst" : "Gruppenbewertung · höchste zuerst"}</span></div>
         <div className="piece-list">{filteredPieces.map((piece) => { const own = ratings[piece.id]; const group = groupRatings[piece.id]; return <article className={`piece-row ${own ? "rated" : ""}`} key={piece.id}><button className="piece-play" onClick={() => openPiece(piece.id)} disabled={!piece.youtubeId} aria-label={`Hörprobe ${piece.title}`}><Play fill="currentColor" /></button><button className="piece-main" onClick={() => openPiece(piece.id)}><div className="piece-title-line"><h3>{piece.title}</h3>{own && <span className="rated-pill"><Check /> {own.skipped ? "Bearbeitet" : "Bewertet"}</span>}{piece.owned && <span className="owned-pill"><BadgeCheck /> Im Bestand</span>}</div><p>{piece.composer}</p><div className="piece-facts"><span><Clock3 /> {formatDuration(piece.durationSeconds)}</span><span>Grade {piece.grade}</span><span><Euro /> {formatPiecePrice(piece)}</span><span className="genre-chip">{piece.genres[0] ?? "Genre offen"}</span>{piece.soloStatus === "available" && <span className="solo-chip"><UserRound /> Solo</span>}</div></button><div className="rating-cell">{own ? <>{own.skipped ? <span className="skipped-rating"><CircleHelp /> Nicht beurteilt</span> : <Stars value={own.stars} small />}<span className="average-note">{group?.count ? `Ø Gruppe ${group.average.toFixed(1).replace(".", ",")}` : "Noch keine Gruppenwertung"}</span></> : <><span className="locked-rating"><Lock /> Gruppe noch verborgen</span><button onClick={() => openPiece(piece.id)}>Bewerten</button></>}</div><ChevronRight className="row-chevron" /></article>; })}</div>
       </div>}
 

@@ -8,8 +8,14 @@ export const metadata: Metadata = {
   title: "Setlist-o-Mat",
   description: "Gemeinsam das beste Konzertprogramm finden.",
   applicationName: "Setlist-o-Mat",
+  manifest: `${publicBasePath}/manifest.webmanifest`,
+  appleWebApp: { capable: true, title: "Setlist-o-Mat", statusBarStyle: "black-translucent" },
   other: { "codex-preview": "development" },
-  icons: { icon: `${publicBasePath}/favicon.svg`, shortcut: `${publicBasePath}/favicon.svg` },
+  icons: {
+    icon: `${publicBasePath}/favicon.svg`,
+    shortcut: `${publicBasePath}/favicon.svg`,
+    apple: [{ url: `${publicBasePath}/apple-touch-icon.png`, sizes: "180x180", type: "image/png" }],
+  },
 };
 
 export const viewport: Viewport = {
