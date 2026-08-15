@@ -706,7 +706,7 @@ export default function Home() {
     if (error || !data?.ok) {
       let reason = data?.error as string | undefined;
       const response = (error as { context?: Response } | null)?.context;
-      if (!reason && response) reason = await response.clone().json().then((body) => body?.error as string | undefined).catch(() => undefined);
+      if (!reason && response) reason = await response.clone().json().then((body) => (body?.error ?? body?.message) as string | undefined).catch(() => undefined);
       flash(reason || "Nutzer konnte nicht gelöscht werden");
       return;
     }
@@ -721,7 +721,7 @@ export default function Home() {
     if (error || !data?.ok || typeof data?.temporaryPassword !== "string") {
       let reason = data?.error as string | undefined;
       const response = (error as { context?: Response } | null)?.context;
-      if (!reason && response) reason = await response.clone().json().then((body) => body?.error as string | undefined).catch(() => undefined);
+      if (!reason && response) reason = await response.clone().json().then((body) => (body?.error ?? body?.message) as string | undefined).catch(() => undefined);
       flash(reason || "Temporäres Passwort konnte nicht erzeugt werden");
       return;
     }
