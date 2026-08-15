@@ -557,9 +557,12 @@ on public.setlists for update to authenticated
 using (state <> 'draft' and private.is_project_admin(project_id))
 with check (state <> 'draft' and private.is_project_admin(project_id));
 
-create policy "owners delete their drafts"
+create policy "owners or admins delete setlists"
 on public.setlists for delete to authenticated
-using (owner_id = (select auth.uid()) and state = 'draft');
+using (
+  owner_id = (select auth.uid())
+  or private.is_project_admin(project_id)
+);
 
 create policy "visible setlist items can be read"
 on public.setlist_items for select to authenticated
