@@ -65,8 +65,13 @@ function friendlyAuthError(message: string, code?: string | null) {
   const normalized = `${code ?? ""} ${message}`.toLocaleLowerCase("de");
   if (normalized.includes("otp_expired") || normalized.includes("invalid or has expired") || normalized.includes("one-time token")) return "Dieser Anmeldelink ist abgelaufen oder wurde bereits verwendet. Bitte fordere eine neue Anmeldemail an und öffne nur den neuesten Link.";
   if (normalized.includes("rate_limit") || normalized.includes("only request this after") || normalized.includes("429")) return "Du hast gerade schon eine Anmeldemail angefordert. Bitte warte kurz und versuche es dann erneut.";
+  if (normalized.includes("invalid login credentials")) return "E-Mail-Adresse oder Passwort ist nicht korrekt.";
+  if (normalized.includes("email not confirmed")) return "Dieses bestehende Konto hat noch kein verwendbares Passwort. Bitte melde dich kurz bei Fabian.";
+  if (normalized.includes("user already registered") || normalized.includes("user_already_exists")) return "Für diese E-Mail-Adresse gibt es bereits ein Konto. Melde dich bitte an – oder kurz bei Fabian, falls das Konto bisher nur einen Mail-Link verwendet hat.";
+  if (normalized.includes("weak_password") || normalized.includes("password should be")) return "Das Passwort muss mindestens acht Zeichen lang sein.";
+  if (normalized.includes("gruppencode")) return "Der Gruppencode stimmt nicht. Prüfe bitte die Schreibweise oder frage kurz in der WhatsApp-Gruppe nach.";
   if (normalized.includes("not allowed") || normalized.includes("signup_disabled")) return "Diese E-Mail-Adresse ist nicht freigeschaltet. Bitte melde dich kurz bei Fabian.";
-  return message || "Die Anmeldung ist fehlgeschlagen. Bitte fordere eine neue Anmeldemail an.";
+  return message || "Die Anmeldung ist fehlgeschlagen. Bitte prüfe deine Eingaben.";
 }
 function getAuthCallbackError(hash: string) {
   const params = new URLSearchParams(hash.replace(/^#/, ""));
@@ -824,7 +829,7 @@ export default function Home() {
     {activeSetlist && <SetlistDialog catalogue={catalogue} setlist={activeSetlist} rating={setlistRatings[String(activeSetlist.id)]} currentUserId={session?.user.id ?? "demo-current"} onCopyLink={() => void copyCurrentLink()} onClose={closeSetlist} onSave={(rating) => { void saveSetlistRating(activeSetlist, rating); closeSetlist(); }} />}
     {builder && <BuilderDialog catalogue={catalogue} setlist={builder} saveState={setlistSaveState} onRetry={() => void flushSetlistSaves()} onClose={closeBuilder} onDelete={() => void deleteSetlist(builder)} onPatch={patchBuilder} onPublish={() => { patchBuilder({ state: "published" }); closeBuilder(); flash("Setlist veröffentlicht – jetzt darf bewertet werden"); }} />}
     {adminPiece && <AdminPieceDialog piece={adminPiece} onClose={() => setAdminEditId(null)} onSave={(patch) => savePieceMetadata(adminPiece, patch)} />}
-    {showProfileDialog && supabase && session && <ProfileNameDialog initialName={suggestedProfileName} required={!profileNameConfirmedAt} email={email} onClose={() => setShowProfileDialog(false)} onSave={saveProfileName} />}
+    {showProfileDialog && supabase && session && <ProfileNameDialog initialName={suggestedProfileName} required={!profileNameConfirmedAt} email={email} onClose={() => setShowProfileDialog(false)} onSave={saveProfileName} onChangePassword={async (password) => { const { error } = await supabase.auth.updateUser({ password }); return error ? friendlyAuthError(error.message, error.code) : null; }} />}
     {toast && <div className="toast"><Check /> {toast}</div>}
   </main>;
 }
@@ -834,44 +839,37 @@ function MaintenanceScreen({ status, signedIn }: { status: MaintenanceStatus; si
 }
 
 function LoginScreen({ supabase, initialMessage }: { supabase: SupabaseClient; initialMessage: string | null }) {
+  const [mode, setMode] = useState<"signin" | "signup">("signin");
+  const [displayName, setDisplayName] = useState("");
   const [email, setEmail] = useState("");
-  const [code, setCode] = useState("");
-  const [sent, setSent] = useState(false);
+  const [password, setPassword] = useState("");
+  const [signupCode, setSignupCode] = useState("");
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState<string | null>(initialMessage);
 
-  const requestCode = async () => {
+  const submit = async () => {
     setBusy(true); setMessage(null);
-    const redirectUrl = new URL(window.location.href);
-    const currentHash = window.location.hash;
-    const storedHash = window.localStorage.getItem(RETURN_HASH_KEY);
-    const returnHash = currentHash && !isSupabaseAuthHash(currentHash) ? currentHash : storedHash && !isSupabaseAuthHash(storedHash) ? storedHash : "#uebersicht";
-    window.localStorage.setItem(RETURN_HASH_KEY, returnHash);
-    redirectUrl.search = "";
-    redirectUrl.hash = "";
-    redirectUrl.searchParams.set("returnHash", returnHash);
-    const { error } = await supabase.auth.signInWithOtp({
-      email: email.trim(),
-      options: { shouldCreateUser: true, emailRedirectTo: redirectUrl.toString() },
-    });
+    const normalizedEmail = email.trim().toLocaleLowerCase("de");
+    const result = mode === "signin"
+      ? await supabase.auth.signInWithPassword({ email: normalizedEmail, password })
+      : await supabase.auth.signUp({ email: normalizedEmail, password, options: { data: { display_name: displayName.trim().replace(/\s+/g, " "), signup_code: signupCode.trim().toLocaleUpperCase("de") } } });
     setBusy(false);
-    if (error) { window.localStorage.removeItem(RETURN_HASH_KEY); setMessage(friendlyAuthError(error.message, error.code)); return; }
-    setSent(true);
-  };
-  const verifyCode = async () => {
-    setBusy(true); setMessage(null);
-    const { error } = await supabase.auth.verifyOtp({ email: email.trim(), token: code.trim(), type: "email" });
-    setBusy(false);
-    if (error) setMessage(friendlyAuthError(error.message, error.code));
+    if (result.error) { setMessage(friendlyAuthError(result.error.message, result.error.code)); return; }
+    if (mode === "signup" && !result.data.session) setMessage("Das Konto wurde angelegt, wartet aber noch auf eine Bestätigung. Bitte melde dich kurz bei Fabian.");
   };
 
-  return <main className="auth-page"><section className="auth-card"><div className="auth-brand"><AppMark /><div><strong>Setlist-o-Mat</strong><span>Gemeinsam. Klingt besser.</span></div></div><div className="auth-art" aria-hidden="true"><Music2 /><span>♪</span><i>✦</i></div><div className="auth-copy"><span className="eyebrow"><Sparkles /> Jahreskonzert 2027</span><h1>{sent ? "Schau kurz ins Postfach." : "Reinhören. Bewerten. Programm bauen."}</h1><p>{sent ? `Wir haben einen Anmeldelink an ${email} geschickt. Öffne ihn direkt – falls die Mail stattdessen einen sechsstelligen Code enthält, kannst du ihn hier eingeben.` : "Ohne Passwort: E-Mail eingeben und den Anmeldelink oder Code aus der Mail verwenden."}</p>{!sent ? <form onSubmit={(event) => { event.preventDefault(); requestCode(); }}><label><span>E-Mail-Adresse</span><input autoComplete="email" inputMode="email" type="email" required value={email} onChange={(event) => setEmail(event.target.value)} placeholder="name@beispiel.de" /></label><button className="primary-button" disabled={busy || !email.trim()}>{busy ? "Wird gesendet …" : "Anmeldemail senden"}<ChevronRight /></button></form> : <form onSubmit={(event) => { event.preventDefault(); verifyCode(); }}><label><span>Sechsstelliger Code <small>falls in der Mail enthalten</small></span><input autoComplete="one-time-code" inputMode="numeric" pattern="[0-9]{6}" maxLength={6} value={code} onChange={(event) => setCode(event.target.value.replace(/\D/g, ""))} placeholder="123456" /></label><button className="primary-button" disabled={busy || code.length !== 6}>{busy ? "Wird geprüft …" : "Code verwenden"}<ChevronRight /></button><button type="button" className="text-button" onClick={() => { setSent(false); setCode(""); setMessage(null); }}>Andere E-Mail verwenden</button></form>}{message && <div className="auth-message"><CircleHelp />{message}</div>}<div className="auth-hint"><BadgeCheck /><span><strong>@musikverein-verl.de</strong> ist automatisch freigeschaltet. Andere Adressen müssen auf der Freigabeliste stehen – im Zweifel kurz per WhatsApp melden.</span></div></div></section></main>;
+  const signupReady = mode === "signin" || (displayName.trim().length >= 2 && signupCode.trim().length >= 6);
+  return <main className="auth-page"><section className="auth-card"><div className="auth-brand"><AppMark /><div><strong>Setlist-o-Mat</strong><span>Gemeinsam. Klingt besser.</span></div></div><div className="auth-art" aria-hidden="true"><Music2 /><span>♪</span><i>✦</i></div><div className="auth-copy"><span className="eyebrow"><Sparkles /> Jahreskonzert 2027</span><h1>{mode === "signin" ? "Willkommen zurück." : "Komm in die Runde."}</h1><p>{mode === "signin" ? "Melde dich mit deiner E-Mail-Adresse und deinem Passwort an. Dafür wird keine Mail verschickt." : "Lege deinen Namen und ein Passwort fest. Du kannst danach sofort loslegen – ganz ohne Bestätigungsmail."}</p><div className="auth-tabs" role="tablist" aria-label="Anmeldung oder Registrierung"><button type="button" role="tab" aria-selected={mode === "signin"} className={mode === "signin" ? "active" : ""} onClick={() => { setMode("signin"); setMessage(null); }}>Anmelden</button><button type="button" role="tab" aria-selected={mode === "signup"} className={mode === "signup" ? "active" : ""} onClick={() => { setMode("signup"); setMessage(null); }}>Neu registrieren</button></div><form onSubmit={(event) => { event.preventDefault(); void submit(); }}>{mode === "signup" && <label><span>Dein Name</span><input autoComplete="name" type="text" required minLength={2} value={displayName} onChange={(event) => setDisplayName(event.target.value)} placeholder="Fabian Rademacher" /></label>}<label><span>E-Mail-Adresse</span><input autoComplete="email" inputMode="email" type="email" required value={email} onChange={(event) => setEmail(event.target.value)} placeholder="name@beispiel.de" /></label><label><span>Passwort <small>mindestens 8 Zeichen</small></span><input autoComplete={mode === "signin" ? "current-password" : "new-password"} type="password" required minLength={8} value={password} onChange={(event) => setPassword(event.target.value)} placeholder="Mindestens 8 Zeichen" /></label>{mode === "signup" && <label><span>Gruppencode <small>aus der WhatsApp-Gruppe</small></span><input autoComplete="off" spellCheck={false} type="text" required value={signupCode} onChange={(event) => setSignupCode(event.target.value.toLocaleUpperCase("de"))} placeholder="TAKT-……" /></label>}<button className="primary-button" disabled={busy || !email.trim() || password.length < 8 || !signupReady}>{busy ? "Einen Moment …" : mode === "signin" ? "Anmelden" : "Konto anlegen"}<ChevronRight /></button></form>{message && <div className="auth-message"><CircleHelp />{message}</div>}<div className="auth-hint"><BadgeCheck /><span><strong>@musikverein-verl.de</strong> ist automatisch freigeschaltet. Andere Adressen müssen zusätzlich auf der Freigabeliste stehen.</span></div><p className="auth-support">Passwort vergessen oder bisher nur per Mail-Link angemeldet? Melde dich kurz bei Fabian.</p></div></section></main>;
 }
 
-function ProfileNameDialog({ initialName, required, email, onClose, onSave }: { initialName: string; required: boolean; email: string; onClose: () => void; onSave: (name: string) => Promise<string | null> }) {
+function ProfileNameDialog({ initialName, required, email, onClose, onSave, onChangePassword }: { initialName: string; required: boolean; email: string; onClose: () => void; onSave: (name: string) => Promise<string | null>; onChangePassword: (password: string) => Promise<string | null> }) {
   const [name, setName] = useState(initialName);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [password, setPassword] = useState("");
+  const [passwordRepeat, setPasswordRepeat] = useState("");
+  const [passwordBusy, setPasswordBusy] = useState(false);
+  const [passwordMessage, setPasswordMessage] = useState<string | null>(null);
   const normalizedName = name.trim().replace(/\s+/g, " ");
   const save = async () => {
     setBusy(true); setError(null);
@@ -879,7 +877,17 @@ function ProfileNameDialog({ initialName, required, email, onClose, onSave }: { 
     setBusy(false);
     if (saveError) setError(saveError);
   };
-  return <div className="dialog-backdrop profile-backdrop" onMouseDown={(event) => !required && event.target === event.currentTarget && onClose()}><section className="dialog profile-dialog" role="dialog" aria-modal="true" aria-label={required ? "Anzeigenamen festlegen" : "Anzeigenamen ändern"}>{!required && <button className="dialog-close" onClick={onClose} aria-label="Schließen"><X /></button>}<div className="profile-icon"><UserRound /></div><span className="dialog-kicker"><Sparkles /> {required ? "Fast geschafft" : "Dein Profil"}</span><h2>{required ? "Wie dürfen wir dich nennen?" : "Wie möchtest du heißen?"}</h2><p className="profile-intro">Dieser Name erscheint bei deinen Bewertungen, Kommentaren und Setlists. Ein Vorname reicht vollkommen.</p><form className="profile-form" onSubmit={(event) => { event.preventDefault(); void save(); }}><label><span>Anzeigename</span><input autoFocus autoComplete="name" maxLength={80} required value={name} onChange={(event) => setName(event.target.value)} placeholder="Zum Beispiel Fabian" /></label><small className="profile-email">Angemeldet als {email}</small>{error && <div className="profile-error"><CircleHelp /> {error}</div>}<div className="dialog-actions">{!required && <button type="button" className="text-button" onClick={onClose}>Abbrechen</button>}<button className="primary-button" disabled={busy || normalizedName.length < 2}>{busy ? "Wird gespeichert …" : "Name speichern"}<Check /></button></div></form></section></div>;
+  const changePassword = async () => {
+    setPasswordMessage(null);
+    if (password.length < 8) { setPasswordMessage("Das Passwort muss mindestens acht Zeichen lang sein."); return; }
+    if (password !== passwordRepeat) { setPasswordMessage("Die beiden Passwörter stimmen nicht überein."); return; }
+    setPasswordBusy(true);
+    const passwordError = await onChangePassword(password);
+    setPasswordBusy(false);
+    if (passwordError) { setPasswordMessage(passwordError); return; }
+    setPassword(""); setPasswordRepeat(""); setPasswordMessage("Passwort gespeichert. Du kannst dich künftig ohne Mail anmelden.");
+  };
+  return <div className="dialog-backdrop profile-backdrop" onMouseDown={(event) => !required && event.target === event.currentTarget && onClose()}><section className="dialog profile-dialog" role="dialog" aria-modal="true" aria-label={required ? "Profil vervollständigen" : "Profil bearbeiten"}>{!required && <button className="dialog-close" onClick={onClose} aria-label="Schließen"><X /></button>}<div className="profile-icon"><UserRound /></div><span className="dialog-kicker"><Sparkles /> {required ? "Fast geschafft" : "Dein Profil"}</span><h2>{required ? "Wie dürfen wir dich nennen?" : "Name und Passwort"}</h2><p className="profile-intro">Dieser Name erscheint bei deinen Bewertungen, Kommentaren und Setlists. Ein Vorname reicht vollkommen.</p><form className="profile-form" onSubmit={(event) => { event.preventDefault(); void save(); }}><label><span>Anzeigename</span><input autoFocus autoComplete="name" maxLength={80} required value={name} onChange={(event) => setName(event.target.value)} placeholder="Zum Beispiel Fabian" /></label><small className="profile-email">Angemeldet als {email}</small>{error && <div className="profile-error"><CircleHelp /> {error}</div>}<div className="dialog-actions profile-name-actions">{!required && <button type="button" className="text-button" onClick={onClose}>Abbrechen</button>}<button className="primary-button" disabled={busy || normalizedName.length < 2}>{busy ? "Wird gespeichert …" : "Name speichern"}<Check /></button></div></form><div className="profile-password"><h3>Passwort festlegen oder ändern</h3><p>Damit kannst du dich ohne Anmeldemail einloggen.</p><label><span>Neues Passwort</span><input autoComplete="new-password" type="password" minLength={8} value={password} onChange={(event) => setPassword(event.target.value)} placeholder="Mindestens 8 Zeichen" /></label><label><span>Passwort wiederholen</span><input autoComplete="new-password" type="password" minLength={8} value={passwordRepeat} onChange={(event) => setPasswordRepeat(event.target.value)} placeholder="Noch einmal eingeben" /></label>{passwordMessage && <div className={passwordMessage.startsWith("Passwort gespeichert") ? "profile-success" : "profile-error"}>{passwordMessage.startsWith("Passwort gespeichert") ? <Check /> : <CircleHelp />} {passwordMessage}</div>}<button type="button" className="secondary-button" disabled={passwordBusy || !password || !passwordRepeat} onClick={() => void changePassword()}>{passwordBusy ? "Wird gespeichert …" : "Passwort speichern"}</button></div></section></div>;
 }
 
 function PieceDialog({ piece, rating, groupRating, onCopyLink, onClose, onSave }: { piece: Piece; rating?: Rating; groupRating?: GroupRating; onCopyLink: () => void; onClose: () => void; onSave: (rating: Rating) => Promise<boolean> }) {
