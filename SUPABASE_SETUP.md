@@ -1,6 +1,6 @@
 # Supabase-Einrichtung für den Setlist-o-Mat
 
-Die App enthält bereits den Login per E-Mail-Code. Ohne Umgebungsvariablen startet sie bewusst im lokalen Demo-Modus.
+Die App verwendet E-Mail-Adresse und Passwort. Ohne Umgebungsvariablen startet sie bewusst im lokalen Demo-Modus.
 
 ## 1. Datenbank aufsetzen
 
@@ -13,6 +13,17 @@ Unter **Authentication → Hooks → Before User Created** die Funktion `private
 - `@musikverein-verl.de` wird automatisch zugelassen.
 - Andere Adressen müssen in `signup_allowed_emails` stehen.
 - `signup_blocked_emails` hat immer Vorrang.
+- Jede neue Registrierung benötigt zusätzlich den gemeinsamen Gruppencode. In `private.signup_access` wird ausschließlich dessen SHA-256-Hash gespeichert; der Klartext gehört nicht ins Repository.
+
+Beispiel zum Setzen oder Rotieren des Gruppencodes (Platzhalter ersetzen):
+
+```sql
+insert into private.signup_access (id, code_hash, updated_at)
+values (true, encode(extensions.digest(upper(trim('<GRUPPENCODE>')), 'sha256'), 'hex'), now())
+on conflict (id) do update
+set code_hash = excluded.code_hash,
+    updated_at = excluded.updated_at;
+```
 
 Nach der ersten eigenen Anmeldung die Admin-Rolle einmalig im SQL-Editor setzen. `<ADMIN-E-MAIL>` dabei durch die eigene Adresse ersetzen:
 
@@ -28,9 +39,11 @@ where user_id = (
 );
 ```
 
-## 3. E-Mail-Code und Resend
+## 3. Passwort-Anmeldung und Resend
 
-In der Supabase-E-Mail-Vorlage für Magic Link/OTP den sechsstelligen Token mit `{{ .Token }}` anzeigen. Unter den SMTP-Einstellungen Resend als Versanddienst eintragen. API-Key und SMTP-Passwort gehören ausschließlich in Supabase, niemals ins Repository oder in eine `NEXT_PUBLIC_*`-Variable.
+Solange kein produktiver SMTP-Dienst bereitsteht, kann **Confirm email** unter Authentication → Sign In / Providers ausgeschaltet werden. Neue Konten werden trotzdem durch Gruppencode, Domain/Freigabeliste und den Before-User-Created-Hook geschützt. Passwort-Anmeldungen versenden keine Mail.
+
+Nach der Verifizierung einer Resend-Absenderdomain Resend unter den SMTP-Einstellungen eintragen und **Confirm email** wieder aktivieren. API-Key und SMTP-Passwort gehören ausschließlich in Supabase, niemals ins Repository oder in eine `NEXT_PUBLIC_*`-Variable.
 
 Für einen ersten Test kann eine von Resend erlaubte Absenderadresse genutzt werden. Die Musikvereins-Domain kann später ohne Codeänderung als Absenderdomain ergänzt werden.
 
