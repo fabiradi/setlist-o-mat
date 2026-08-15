@@ -18,14 +18,21 @@ Deno.serve(async (request) => {
   const anonKey = Deno.env.get("SUPABASE_ANON_KEY");
   const serviceRoleKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
   const authorization = request.headers.get("authorization");
-  if (!supabaseUrl || !anonKey || !serviceRoleKey || !authorization) return json({ error: "Unauthorized" }, 401);
+  const token = authorization?.match(/^Bearer\s+(.+)$/i)?.[1];
+  if (!supabaseUrl || !anonKey || !serviceRoleKey || !token) {
+    console.warn("admin-delete-user: missing environment or bearer token");
+    return json({ error: "Unauthorized" }, 401);
+  }
 
   const callerClient = createClient(supabaseUrl, anonKey, {
     global: { headers: { authorization } },
     auth: { persistSession: false },
   });
-  const { data: callerData, error: callerError } = await callerClient.auth.getUser();
-  if (callerError || !callerData.user) return json({ error: "Unauthorized" }, 401);
+  const { data: callerData, error: callerError } = await callerClient.auth.getUser(token);
+  if (callerError || !callerData.user) {
+    console.warn("admin-delete-user: bearer token could not be verified");
+    return json({ error: "Unauthorized" }, 401);
+  }
 
   const adminClient = createClient(supabaseUrl, serviceRoleKey, { auth: { persistSession: false } });
   const { data: profile } = await adminClient.from("profiles").select("is_app_admin").eq("id", callerData.user.id).single();
@@ -34,6 +41,15 @@ Deno.serve(async (request) => {
   const { userId } = await request.json().catch(() => ({ userId: null }));
   if (typeof userId !== "string") return json({ error: "userId is required" }, 400);
   if (userId === callerData.user.id) return json({ error: "Das eigene Admin-Konto kann hier nicht gelöscht werden." }, 400);
+
+  const { data: targetProfile, error: targetError } = await adminClient
+    .from("profiles")
+    .select("is_app_admin")
+    .eq("id", userId)
+    .maybeSingle();
+  if (targetError) return json({ error: targetError.message }, 400);
+  if (!targetProfile) return json({ error: "Benutzerkonto nicht gefunden." }, 404);
+  if (targetProfile.is_app_admin) return json({ error: "Andere Admin-Konten können hier nicht gelöscht werden." }, 400);
 
   const { error } = await adminClient.auth.admin.deleteUser(userId);
   if (error) return json({ error: error.message }, 400);
