@@ -34,6 +34,50 @@ type MaintenanceStatus = { enabled: boolean; message: string; startedAt: string 
 type SetlistSaveState = "idle" | "saving" | "saved" | "error";
 type PendingSetlistSave = { setlistId: string; name: string; pieceIds: string[]; publish: boolean };
 type AppRoute = { view: View; pieceId: number | null; setlistId: number | string | null; editSetlist: boolean; search: string; genre: string; onlyOpen: boolean; setlistFilter: SetlistFilter };
+type YouTubePlayer = {
+  cuePlaylist: (playlist: string[], index?: number, startSeconds?: number) => void;
+  getPlaylistIndex: () => number;
+  destroy: () => void;
+};
+type YouTubePlayerEvent = { target: YouTubePlayer; data?: number };
+type YouTubeApi = {
+  Player: new (element: HTMLElement, options: {
+    width: string; height: string; videoId: string; host?: string;
+    playerVars: Record<string, string | number>;
+    events: { onReady: (event: YouTubePlayerEvent) => void; onStateChange: (event: YouTubePlayerEvent) => void };
+  }) => YouTubePlayer;
+};
+
+declare global {
+  interface Window {
+    YT?: YouTubeApi;
+    onYouTubeIframeAPIReady?: () => void;
+  }
+}
+
+let youtubeApiPromise: Promise<YouTubeApi> | null = null;
+
+function loadYouTubeApi() {
+  if (window.YT?.Player) return Promise.resolve(window.YT);
+  if (youtubeApiPromise) return youtubeApiPromise;
+  youtubeApiPromise = new Promise<YouTubeApi>((resolve, reject) => {
+    const previousReady = window.onYouTubeIframeAPIReady;
+    window.onYouTubeIframeAPIReady = () => {
+      previousReady?.();
+      if (window.YT) resolve(window.YT);
+    };
+    if (document.querySelector('script[src="https://www.youtube.com/iframe_api"]')) return;
+    const script = document.createElement("script");
+    script.src = "https://www.youtube.com/iframe_api";
+    script.async = true;
+    script.onerror = () => {
+      youtubeApiPromise = null;
+      reject(new Error("YouTube Player API konnte nicht geladen werden."));
+    };
+    document.head.appendChild(script);
+  });
+  return youtubeApiPromise;
+}
 
 const pieces = rawPieces as Piece[];
 const TARGET_MIN = 25 * 60;
@@ -983,12 +1027,62 @@ function PieceRatingBadges({ rating, groupRating }: { rating?: Rating; groupRati
 
 function SetlistPlayer({ pieces, compact = false }: { pieces: Piece[]; compact?: boolean }) {
   const playable = pieces.filter((piece): piece is Piece & { youtubeId: string } => Boolean(piece.youtubeId));
+  const playlistKey = playable.map((piece) => piece.youtubeId).join(",");
+  const playerHostRef = useRef<HTMLDivElement>(null);
+  const playerRef = useRef<YouTubePlayer | null>(null);
+  const activePieceIdRef = useRef<number | null>(playable[0]?.id ?? null);
+  const [activePieceId, setActivePieceId] = useState<number | null>(playable[0]?.id ?? null);
+  const [apiFailed, setApiFailed] = useState(false);
+
+  const reportActivePiece = (pieceId: number) => {
+    activePieceIdRef.current = pieceId;
+    setActivePieceId(pieceId);
+  };
+
+  const selectPiece = (pieceId: number) => {
+    const index = playable.findIndex((piece) => piece.id === pieceId);
+    if (index < 0) return;
+    reportActivePiece(pieceId);
+    playerRef.current?.cuePlaylist(playable.map((piece) => piece.youtubeId), index, 0);
+  };
+
+  useEffect(() => {
+    if (!playable.length || !playerHostRef.current) return;
+    let cancelled = false;
+    const videoIds = playable.map((piece) => piece.youtubeId);
+    const initialIndex = Math.max(0, playable.findIndex((piece) => piece.id === activePieceIdRef.current));
+    if (!playable.some((piece) => piece.id === activePieceIdRef.current)) reportActivePiece(playable[initialIndex].id);
+    setApiFailed(false);
+    void loadYouTubeApi().then((YT) => {
+      if (cancelled || !playerHostRef.current) return;
+      playerRef.current = new YT.Player(playerHostRef.current, {
+        width: "100%",
+        height: "100%",
+        videoId: videoIds[initialIndex],
+        host: "https://www.youtube-nocookie.com",
+        playerVars: { rel: 0, playsinline: 1, origin: window.location.origin },
+        events: {
+          onReady: (event) => event.target.cuePlaylist(videoIds, initialIndex, 0),
+          onStateChange: (event) => {
+            const index = event.target.getPlaylistIndex();
+            if (index >= 0 && playable[index]) reportActivePiece(playable[index].id);
+          },
+        },
+      });
+    }).catch(() => !cancelled && setApiFailed(true));
+    return () => {
+      cancelled = true;
+      playerRef.current?.destroy();
+      playerRef.current = null;
+    };
+  // Die Signatur bildet exakt die für den Player relevante Reihenfolge ab.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [playlistKey]);
+
   if (!playable.length) return null;
-  const firstVideoId = playable[0].youtubeId;
-  const followingVideoIds = playable.slice(1).map((piece) => piece.youtubeId).join(",");
-  const src = `https://www.youtube-nocookie.com/embed/${firstVideoId}?rel=0&playsinline=1${followingVideoIds ? `&playlist=${followingVideoIds}` : ""}`;
+  const activePiece = playable.find((piece) => piece.id === activePieceId) ?? playable[0];
   const missingSamples = pieces.length - playable.length;
-  return <section className={`setlist-player ${compact ? "compact" : ""}`}><header><div><Play fill="currentColor" /><span>Setlist abspielen</span></div><small>{playable.length} {playable.length === 1 ? "Hörprobe" : "Hörproben"} in Programmreihenfolge</small></header><div className="youtube-wrap"><iframe key={playable.map((piece) => piece.youtubeId).join("-")} src={src} title="Hörproben der Setlist" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture" referrerPolicy="strict-origin-when-cross-origin" allowFullScreen /></div>{missingSamples > 0 && <p><CircleHelp /> {missingSamples} {missingSamples === 1 ? "Stück hat" : "Stücke haben"} keine abspielbare Hörprobe und {missingSamples === 1 ? "wird" : "werden"} ausgelassen.</p>}</section>;
+  return <section className={`setlist-player ${compact ? "compact" : ""}`}><header><div><Play fill="currentColor" /><span>Setlist abspielen</span></div><small>Im Player: <strong>{activePiece.title}</strong> · {playable.length} {playable.length === 1 ? "Hörprobe" : "Hörproben"}</small></header><div className="youtube-wrap">{apiFailed ? <iframe src={`https://www.youtube-nocookie.com/embed/${activePiece.youtubeId}?rel=0&playsinline=1`} title={`Hörprobe ${activePiece.title}`} allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture" referrerPolicy="strict-origin-when-cross-origin" allowFullScreen /> : <div key={playlistKey} ref={playerHostRef} />}</div><ol className="setlist-player-queue" aria-label="Abspielliste">{playable.map((piece, index) => <li className={piece.id === activePiece.id ? "active" : ""} key={piece.id}><button type="button" onClick={() => selectPiece(piece.id)} aria-current={piece.id === activePiece.id ? "true" : undefined}><span>{index + 1}</span><strong>{piece.title}</strong>{piece.id === activePiece.id && <Play fill="currentColor" />}</button></li>)}</ol>{missingSamples > 0 && <p><CircleHelp /> {missingSamples} {missingSamples === 1 ? "Stück hat" : "Stücke haben"} keine abspielbare Hörprobe und {missingSamples === 1 ? "wird" : "werden"} ausgelassen.</p>}</section>;
 }
 
 function BuilderDialog({ catalogue, setlist, pieceRatings, groupRatings, saveState, onRetry, onClose, onDelete, onPatch, onPublish }: { catalogue: Piece[]; setlist: Setlist; pieceRatings: Record<number, Rating>; groupRatings: Record<number, GroupRating>; saveState: SetlistSaveState; onRetry: () => void; onClose: () => void; onDelete: () => void; onPatch: (patch: Partial<Setlist>) => void; onPublish: () => void }) {
