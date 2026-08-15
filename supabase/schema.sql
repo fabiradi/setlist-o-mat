@@ -24,6 +24,7 @@ create table public.profiles (
   email extensions.citext not null unique,
   display_name text not null check (length(trim(display_name)) between 1 and 80),
   name_confirmed_at timestamptz,
+  password_change_required boolean not null default false,
   is_app_admin boolean not null default false,
   last_seen_at timestamptz,
   created_at timestamptz not null default now(),
