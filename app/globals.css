@@ -311,9 +311,39 @@ small {
   flex-wrap: wrap;
 }
 
+.setlist-footer {
+  flex-wrap: wrap;
+}
+
+.setlist-card-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 3px;
+  margin-left: auto;
+  flex-wrap: wrap;
+}
+
+.setlist-print-button {
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  background: #fff;
+}
+
+.setlist-print-button:hover {
+  border-color: #cfc3f1;
+  background: var(--purple-soft);
+}
+
 @media (max-width: 760px) {
   .setlist-dialog .dialog-link-actions {
     justify-content: flex-start;
+  }
+
+  .setlist-card-actions {
+    width: 100%;
+    justify-content: space-between;
+    margin-left: 0;
   }
 }
 
