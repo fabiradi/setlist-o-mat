@@ -64,7 +64,7 @@ Nach einem geprüften Excel-Import wird `app/data/pieces.json` aktualisiert. Ans
 
 ## 6. Nutzer vollständig löschen
 
-Die Edge Function `admin-delete-user` mit der Supabase CLI deployen. Die Funktion prüft den eingeloggten Aufrufer serverseitig als App-Admin und nutzt den Service-Role-Key ausschließlich in der geschützten Function-Umgebung. Das eigene Admin-Konto kann darüber nicht versehentlich gelöscht werden.
+Die Edge Function `admin-delete-user` mit der Supabase CLI deployen. Die Funktion prüft den eingeloggten Aufrufer mit `@supabase/server` serverseitig als App-Admin und nutzt den von Supabase bereitgestellten Secret-Key ausschließlich in der geschützten Function-Umgebung. Das eigene Admin-Konto kann darüber nicht versehentlich gelöscht werden.
 
 ## 7. Temporäres Passwort vergeben
 
