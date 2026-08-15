@@ -303,4 +303,156 @@ small {
   line-height: 1.35;
 }
 
+.dialog-link-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 3px;
+  flex-wrap: wrap;
+}
+
+@media (max-width: 760px) {
+  .setlist-dialog .dialog-link-actions {
+    justify-content: flex-start;
+  }
+}
+
+@media print {
+  @page {
+    size: A4 portrait;
+    margin: 14mm;
+  }
+
+  html,
+  body,
+  .app-shell {
+    min-height: 0;
+    background: #fff !important;
+  }
+
+  body {
+    color: #21192f;
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+  }
+
+  .app-shell > :not(.dialog-backdrop) {
+    display: none !important;
+  }
+
+  .app-shell > .dialog-backdrop {
+    position: static;
+    inset: auto;
+    display: block;
+    padding: 0;
+    overflow: visible;
+    background: transparent;
+    backdrop-filter: none;
+  }
+
+  .setlist-dialog {
+    width: 100%;
+    max-height: none;
+    overflow: visible;
+    padding: 0;
+    border-radius: 0;
+    background: #fff;
+    box-shadow: none;
+  }
+
+  .setlist-dialog .dialog-close,
+  .setlist-dialog .dialog-link-actions,
+  .setlist-dialog .setlist-player,
+  .setlist-dialog > .rating-panel,
+  .setlist-dialog > .dialog-actions {
+    display: none !important;
+  }
+
+  .setlist-dialog h2 {
+    margin-right: 0;
+    font-size: 24pt;
+  }
+
+  .setlist-dialog .dialog-kicker {
+    font-size: 9pt;
+  }
+
+  .setlist-dialog .dialog-subtitle-row {
+    display: block;
+  }
+
+  .setlist-dialog .dialog-subtitle {
+    font-size: 10pt;
+  }
+
+  .setlist-dialog > .time-signal {
+    margin: 8mm 0 4mm;
+    break-inside: avoid;
+  }
+
+  .setlist-dialog-metrics {
+    display: flex;
+    gap: 4mm 8mm;
+    padding: 3mm 0;
+    font-size: 9pt;
+  }
+
+  .setlist-dialog-genres {
+    padding-bottom: 4mm;
+  }
+
+  .setlist-dialog .genre-chip {
+    border: 1px solid #ded7e7;
+    background: transparent;
+  }
+
+  .setlist-dialog-pieces {
+    max-height: none;
+    overflow: visible;
+    margin-top: 3mm;
+  }
+
+  .setlist-dialog-pieces li {
+    break-inside: avoid;
+    grid-template-columns: 8mm minmax(0, 1fr) auto;
+    align-items: center;
+    gap: 3mm;
+    padding: 3mm 0;
+  }
+
+  .setlist-dialog-pieces li > small {
+    grid-column: auto;
+    grid-row: auto;
+    justify-self: auto;
+    margin: 0 !important;
+    font-size: 8pt !important;
+  }
+
+  .setlist-dialog-pieces strong {
+    font-size: 10pt;
+  }
+
+  .setlist-dialog-pieces span,
+  .setlist-dialog-pieces small {
+    font-size: 8pt;
+  }
+
+  .piece-rating-badges > span {
+    border: 1px solid #ded7e7;
+    background: transparent !important;
+    color: #3d3547 !important;
+  }
+
+  .setlist-discussion {
+    margin-top: 6mm;
+    padding: 4mm;
+    background: #f3f0f8 !important;
+  }
+
+  .discussion-summary,
+  .discussion-comments article {
+    break-inside: avoid;
+  }
+}
+
 @media (prefers-reduced-motion: reduce) { *, *:before, *:after { scroll-behavior: auto !important; animation: none !important; transition: none !important; } }
