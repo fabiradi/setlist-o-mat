@@ -618,3 +618,9 @@ grant select, insert, update, delete on all tables in schema public to authentic
 alter default privileges in schema public grant select, insert, update, delete on tables to authenticated;
 grant usage on schema public to anon;
 grant select on public.app_settings to anon;
+
+-- The admin Edge Functions use Supabase's server-side secret key. New projects
+-- can start without Data API table privileges for service_role, so grant only
+-- what these functions need to verify admins and mark password resets.
+grant usage on schema public to service_role;
+grant select, update on public.profiles to service_role;
