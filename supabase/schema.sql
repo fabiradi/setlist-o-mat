@@ -7,6 +7,13 @@ create extension if not exists citext with schema extensions;
 create schema if not exists private;
 revoke all on schema private from public, anon, authenticated;
 
+create table private.signup_access (
+  id boolean primary key default true check (id),
+  code_hash text not null,
+  updated_at timestamptz not null default now()
+);
+revoke all on table private.signup_access from public, anon, authenticated;
+
 create type public.project_role as enum ('member', 'admin');
 create type public.member_status as enum ('active', 'suspended');
 create type public.solo_status as enum ('unknown', 'none', 'available');
@@ -328,6 +335,8 @@ set search_path = ''
 as $$
 declare
   candidate_email extensions.citext := lower(event->'user'->>'email');
+  candidate_code text := upper(trim(coalesce(event->'user'->'user_metadata'->>'signup_code', '')));
+  expected_code_hash text;
 begin
   if candidate_email is null then
     return jsonb_build_object('error', jsonb_build_object(
@@ -340,6 +349,18 @@ begin
     return jsonb_build_object('error', jsonb_build_object(
       'http_code', 403,
       'message', 'Diese E-Mail-Adresse ist für den Setlist-o-Mat gesperrt.'
+    ));
+  end if;
+
+  select s.code_hash into expected_code_hash
+  from private.signup_access s
+  where s.id = true;
+
+  if expected_code_hash is null
+     or encode(extensions.digest(candidate_code, 'sha256'), 'hex') <> expected_code_hash then
+    return jsonb_build_object('error', jsonb_build_object(
+      'http_code', 403,
+      'message', 'Der Gruppencode ist nicht korrekt.'
     ));
   end if;
 
