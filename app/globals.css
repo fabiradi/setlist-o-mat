@@ -335,6 +335,18 @@ small {
   background: var(--purple-soft);
 }
 
+.dialog-danger-actions {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin-right: auto;
+  flex-wrap: wrap;
+}
+
+.dialog-danger-actions .dialog-danger-button {
+  margin-right: 0;
+}
+
 @media (max-width: 760px) {
   .setlist-dialog .dialog-link-actions {
     justify-content: flex-start;
@@ -344,6 +356,14 @@ small {
     width: 100%;
     justify-content: space-between;
     margin-left: 0;
+  }
+
+  .setlist-dialog .dialog-danger-actions {
+    width: 100%;
+  }
+
+  .setlist-dialog .dialog-danger-actions .dialog-danger-button {
+    width: 100%;
   }
 }
 

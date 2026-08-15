@@ -688,6 +688,31 @@ export default function Home() {
     flash("Bewertung gespeichert");
     return true;
   };
+  const resetPieceRating = async (pieceId: number) => {
+    const previousRating = ratings[pieceId];
+    if (!previousRating) return true;
+    if (supabase && session && remotePieceIds[pieceId]) {
+      const { error } = await supabase.from("piece_ratings").delete().eq("piece_id", remotePieceIds[pieceId]).eq("user_id", session.user.id);
+      if (error) {
+        console.error("piece rating reset failed", error);
+        flash("Bewertung konnte nicht zurückgesetzt werden");
+        return false;
+      }
+    }
+    setRatings((current) => {
+      const next = { ...current };
+      delete next[pieceId];
+      return next;
+    });
+    setGroupRatings((current) => {
+      const next = { ...current };
+      delete next[pieceId];
+      return next;
+    });
+    if (session) setMembers((current) => current.map((member) => member.id === session.user.id ? { ...member, ratingsCompleted: Math.max(0, member.ratingsCompleted - 1) } : member));
+    flash("Bewertung zurückgesetzt – das Stück ist wieder offen");
+    return true;
+  };
   const createSetlist = async () => {
     const name = artNames[setlists.length % artNames.length];
     if (supabase && session) {
@@ -771,6 +796,38 @@ export default function Home() {
       };
     }));
     flash("Setlist-Bewertung gespeichert");
+  };
+  const resetSetlistRating = async (setlist: Setlist) => {
+    const key = String(setlist.id);
+    if (!setlistRatings[key]) return true;
+    const userId = session?.user.id ?? "demo-current";
+    if (supabase && session && typeof setlist.id === "string") {
+      const { error } = await supabase.from("setlist_ratings").delete().eq("setlist_id", setlist.id).eq("user_id", session.user.id);
+      if (error) {
+        console.error("setlist rating reset failed", error);
+        flash("Setlist-Bewertung konnte nicht zurückgesetzt werden");
+        return false;
+      }
+    }
+    setSetlistRatings((current) => {
+      const next = { ...current };
+      delete next[key];
+      return next;
+    });
+    setSetlists((current) => current.map((item) => {
+      if (item.id !== setlist.id) return item;
+      const reviews = item.reviews.filter((review) => review.userId !== userId);
+      const stars = reviews.map((review) => review.stars);
+      return {
+        ...item,
+        reviews,
+        rating: stars.length ? stars.reduce((sum, value) => sum + value, 0) / stars.length : 0,
+        ratingCount: stars.length,
+        comments: reviews.filter((review) => review.comment.trim()).length,
+      };
+    }));
+    flash("Setlist-Bewertung zurückgesetzt");
+    return true;
   };
   const addAllowedEmail = async () => {
     if (!supabase || !isAdmin) return;
@@ -949,8 +1006,8 @@ export default function Home() {
     </section>
 
     <nav className="bottom-nav" aria-label="Mobile Navigation">{navItems.map((item) => { const Icon = item.icon; return <button key={item.id} className={view === item.id ? "active" : ""} onClick={() => navigateToView(item.id)}><Icon /><span>{item.label}</span>{item.id === "pieces" && <i>{catalogue.length - completed}</i>}</button>; })}</nav>
-    {activePiece && <PieceDialog piece={activePiece} rating={ratings[activePiece.id]} groupRating={groupRatings[activePiece.id]} onCopyLink={() => void copyCurrentLink()} onClose={closePiece} onSave={(rating) => saveRating(activePiece.id, rating)} />}
-    {activeSetlist && <SetlistDialog catalogue={catalogue} setlist={activeSetlist} rating={setlistRatings[String(activeSetlist.id)]} pieceRatings={ratings} groupRatings={groupRatings} currentUserId={session?.user.id ?? "demo-current"} canDelete={!supabase || activeSetlist.ownerId === session?.user.id || isAdmin} onCopyLink={() => void copyCurrentLink()} onClose={closeSetlist} onDelete={() => void deleteSetlist(activeSetlist)} onSave={(rating) => { void saveSetlistRating(activeSetlist, rating); closeSetlist(); }} />}
+    {activePiece && <PieceDialog piece={activePiece} rating={ratings[activePiece.id]} groupRating={groupRatings[activePiece.id]} onCopyLink={() => void copyCurrentLink()} onClose={closePiece} onReset={() => resetPieceRating(activePiece.id)} onSave={(rating) => saveRating(activePiece.id, rating)} />}
+    {activeSetlist && <SetlistDialog catalogue={catalogue} setlist={activeSetlist} rating={setlistRatings[String(activeSetlist.id)]} pieceRatings={ratings} groupRatings={groupRatings} currentUserId={session?.user.id ?? "demo-current"} canDelete={!supabase || activeSetlist.ownerId === session?.user.id || isAdmin} onCopyLink={() => void copyCurrentLink()} onClose={closeSetlist} onDelete={() => void deleteSetlist(activeSetlist)} onReset={() => resetSetlistRating(activeSetlist)} onSave={(rating) => { void saveSetlistRating(activeSetlist, rating); closeSetlist(); }} />}
     {builder && <BuilderDialog catalogue={catalogue} setlist={builder} pieceRatings={ratings} groupRatings={groupRatings} saveState={setlistSaveState} onRetry={() => void flushSetlistSaves()} onClose={closeBuilder} onDelete={() => void deleteSetlist(builder)} onPatch={patchBuilder} onPublish={() => { patchBuilder({ state: "published" }); closeBuilder(); flash("Setlist veröffentlicht – jetzt darf bewertet werden"); }} />}
     {adminPiece && <AdminPieceDialog piece={adminPiece} onClose={() => setAdminEditId(null)} onSave={(patch) => savePieceMetadata(adminPiece, patch)} />}
     {showProfileDialog && supabase && session && <ProfileNameDialog initialName={suggestedProfileName} required={!profileNameConfirmedAt} email={email} onClose={() => setShowProfileDialog(false)} onSave={saveProfileName} onChangePassword={changeOwnPassword} />}
@@ -1040,7 +1097,7 @@ function ProfileNameDialog({ initialName, required, email, onClose, onSave, onCh
   return <div className="dialog-backdrop profile-backdrop" onMouseDown={(event) => !required && event.target === event.currentTarget && onClose()}><section className="dialog profile-dialog" role="dialog" aria-modal="true" aria-label={required ? "Profil vervollständigen" : "Profil bearbeiten"}>{!required && <button className="dialog-close" onClick={onClose} aria-label="Schließen"><X /></button>}<div className="profile-icon"><UserRound /></div><span className="dialog-kicker"><Sparkles /> {required ? "Fast geschafft" : "Dein Profil"}</span><h2>{required ? "Wie dürfen wir dich nennen?" : "Name und Passwort"}</h2><p className="profile-intro">Dieser Name erscheint bei deinen Bewertungen, Kommentaren und Setlists. Ein Vorname reicht vollkommen.</p><form className="profile-form" onSubmit={(event) => { event.preventDefault(); void save(); }}><label><span>Anzeigename</span><input autoFocus autoComplete="name" maxLength={80} required value={name} onChange={(event) => setName(event.target.value)} placeholder="Zum Beispiel Fabian" /></label><small className="profile-email">Angemeldet als {email}</small>{error && <div className="profile-error"><CircleHelp /> {error}</div>}<div className="dialog-actions profile-name-actions">{!required && <button type="button" className="text-button" onClick={onClose}>Abbrechen</button>}<button className="primary-button" disabled={busy || normalizedName.length < 2}>{busy ? "Wird gespeichert …" : "Name speichern"}<Check /></button></div></form><div className="profile-password"><h3>Passwort festlegen oder ändern</h3><p>Damit kannst du dich ohne Anmeldemail einloggen.</p><label><span>Neues Passwort</span><input autoComplete="new-password" type="password" minLength={8} value={password} onChange={(event) => setPassword(event.target.value)} placeholder="Mindestens 8 Zeichen" /></label><label><span>Passwort wiederholen</span><input autoComplete="new-password" type="password" minLength={8} value={passwordRepeat} onChange={(event) => setPasswordRepeat(event.target.value)} placeholder="Noch einmal eingeben" /></label>{passwordMessage && <div className={passwordMessage.startsWith("Passwort gespeichert") ? "profile-success" : "profile-error"}>{passwordMessage.startsWith("Passwort gespeichert") ? <Check /> : <CircleHelp />} {passwordMessage}</div>}<button type="button" className="secondary-button" disabled={passwordBusy || !password || !passwordRepeat} onClick={() => void changePassword()}>{passwordBusy ? "Wird gespeichert …" : "Passwort speichern"}</button></div></section></div>;
 }
 
-function PieceDialog({ piece, rating, groupRating, onCopyLink, onClose, onSave }: { piece: Piece; rating?: Rating; groupRating?: GroupRating; onCopyLink: () => void; onClose: () => void; onSave: (rating: Rating) => Promise<boolean> }) {
+function PieceDialog({ piece, rating, groupRating, onCopyLink, onClose, onReset, onSave }: { piece: Piece; rating?: Rating; groupRating?: GroupRating; onCopyLink: () => void; onClose: () => void; onReset: () => Promise<boolean>; onSave: (rating: Rating) => Promise<boolean> }) {
   const [stars, setStars] = useState<number | null>(rating?.stars ?? null);
   const [skipped, setSkipped] = useState(rating?.skipped ?? false);
   const [comment, setComment] = useState(rating?.comment ?? "");
@@ -1052,7 +1109,14 @@ function PieceDialog({ piece, rating, groupRating, onCopyLink, onClose, onSave }
     setSaving(false);
     if (saved) onClose();
   };
-  return <div className="dialog-backdrop" onMouseDown={(event) => !saving && event.target === event.currentTarget && onClose()}><section className="dialog piece-dialog" role="dialog" aria-modal="true" aria-label={`${piece.title} bewerten`}><button className="dialog-close" disabled={saving} onClick={onClose}><X /></button><div className="dialog-kicker"><Headphones /> Hörprobe & Bewertung</div><h2>{piece.title}</h2><div className="dialog-subtitle-row"><p className="dialog-subtitle">{piece.composer}</p><button className="dialog-link-button" onClick={onCopyLink}><Copy /> Link kopieren</button></div><div className="dialog-facts"><span><Clock3 /> {formatDuration(piece.durationSeconds)}</span><span>Grade {piece.grade}</span><span><Euro /> {formatPiecePrice(piece)}</span>{piece.genres.map((item) => <span className="genre-chip" key={item}>{item}</span>)}{piece.owned && <span className="owned-pill"><BadgeCheck /> Im Bestand</span>}{piece.soloStatus === "available" && <span className="solo-chip"><UserRound /> Solo: {piece.solos || "Instrumente noch offen"}</span>}{piece.soloStatus === "unknown" && <span className="solo-chip unknown"><CircleHelp /> Soli noch nicht erfasst</span>}</div>{(piece.source.trim() || piece.note?.trim()) && <div className="piece-metadata">{piece.source.trim() && <div><span>Quelle</span><strong>{piece.source}</strong></div>}{piece.note?.trim() && <div className="piece-note"><span>Kommentar / Medley-Stücke</span><p>{piece.note}</p></div>}</div>}{piece.youtubeId ? <div className="youtube-wrap"><iframe src={`https://www.youtube-nocookie.com/embed/${piece.youtubeId}?rel=0`} title={`Hörprobe ${piece.title}`} allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture" allowFullScreen /></div> : <div className="no-sample"><Headphones /><strong>Keine Hörprobe hinterlegt</strong><span>Du kannst das Stück trotzdem bewerten oder überspringen.</span></div>}<div className="rating-panel"><div className="rating-question"><span>Wie gut passt das Stück ins Konzert?</span><Stars value={skipped ? null : stars} onChange={(value) => { setSkipped(false); setStars(value); }} /></div><button className={skipped ? "skip-button active" : "skip-button"} onClick={() => { setSkipped(true); setStars(null); }}><CircleHelp /> Kann ich nicht beurteilen</button><label><span>Dein Kommentar <small>optional</small></span><textarea value={comment} onChange={(event) => setComment(event.target.value)} placeholder="Was spricht dafür oder dagegen? Soli, Wirkung, Besetzung …" /></label>{rating && groupRating?.count ? <div className="group-peek"><div><Users /><span>Gruppe · {groupRating.count} Bewertungen</span></div><strong>Ø {groupRating.average.toFixed(1).replace(".", ",")}</strong><Stars value={Math.round(groupRating.average)} small />{groupRating.comments.length > 0 && <details><summary>{groupRating.comments.length} Kommentare lesen</summary>{groupRating.comments.map((entry, index) => <p key={`${entry.author}-${index}`}><strong>{entry.author}:</strong> {entry.text}</p>)}</details>}</div> : rating && <div className="group-peek"><div><Users /><span>Noch keine weitere Gruppenbewertung</span></div></div>}</div><div className="dialog-actions"><button className="text-button" disabled={saving} onClick={onClose}>Abbrechen</button><button className="primary-button" disabled={saving || (!stars && !skipped)} onClick={() => void submit()}><Check /> {saving ? "Wird gespeichert …" : "Bewertung speichern"}</button></div></section></div>;
+  const reset = async () => {
+    if (!window.confirm("Deine Bewertung und dein Kommentar werden gelöscht. Möchtest du wirklich zurücksetzen?")) return;
+    setSaving(true);
+    const resetDone = await onReset();
+    setSaving(false);
+    if (resetDone) onClose();
+  };
+  return <div className="dialog-backdrop" onMouseDown={(event) => !saving && event.target === event.currentTarget && onClose()}><section className="dialog piece-dialog" role="dialog" aria-modal="true" aria-label={`${piece.title} bewerten`}><button className="dialog-close" disabled={saving} onClick={onClose}><X /></button><div className="dialog-kicker"><Headphones /> Hörprobe & Bewertung</div><h2>{piece.title}</h2><div className="dialog-subtitle-row"><p className="dialog-subtitle">{piece.composer}</p><button className="dialog-link-button" onClick={onCopyLink}><Copy /> Link kopieren</button></div><div className="dialog-facts"><span><Clock3 /> {formatDuration(piece.durationSeconds)}</span><span>Grade {piece.grade}</span><span><Euro /> {formatPiecePrice(piece)}</span>{piece.genres.map((item) => <span className="genre-chip" key={item}>{item}</span>)}{piece.owned && <span className="owned-pill"><BadgeCheck /> Im Bestand</span>}{piece.soloStatus === "available" && <span className="solo-chip"><UserRound /> Solo: {piece.solos || "Instrumente noch offen"}</span>}{piece.soloStatus === "unknown" && <span className="solo-chip unknown"><CircleHelp /> Soli noch nicht erfasst</span>}</div>{(piece.source.trim() || piece.note?.trim()) && <div className="piece-metadata">{piece.source.trim() && <div><span>Quelle</span><strong>{piece.source}</strong></div>}{piece.note?.trim() && <div className="piece-note"><span>Kommentar / Medley-Stücke</span><p>{piece.note}</p></div>}</div>}{piece.youtubeId ? <div className="youtube-wrap"><iframe src={`https://www.youtube-nocookie.com/embed/${piece.youtubeId}?rel=0`} title={`Hörprobe ${piece.title}`} allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture" allowFullScreen /></div> : <div className="no-sample"><Headphones /><strong>Keine Hörprobe hinterlegt</strong><span>Du kannst das Stück trotzdem bewerten oder überspringen.</span></div>}<div className="rating-panel"><div className="rating-question"><span>Wie gut passt das Stück ins Konzert?</span><Stars value={skipped ? null : stars} onChange={(value) => { setSkipped(false); setStars(value); }} /></div><button className={skipped ? "skip-button active" : "skip-button"} onClick={() => { setSkipped(true); setStars(null); }}><CircleHelp /> Kann ich nicht beurteilen</button><label><span>Dein Kommentar <small>optional</small></span><textarea value={comment} onChange={(event) => setComment(event.target.value)} placeholder="Was spricht dafür oder dagegen? Soli, Wirkung, Besetzung …" /></label>{rating && groupRating?.count ? <div className="group-peek"><div><Users /><span>Gruppe · {groupRating.count} Bewertungen</span></div><strong>Ø {groupRating.average.toFixed(1).replace(".", ",")}</strong><Stars value={Math.round(groupRating.average)} small />{groupRating.comments.length > 0 && <details><summary>{groupRating.comments.length} Kommentare lesen</summary>{groupRating.comments.map((entry, index) => <p key={`${entry.author}-${index}`}><strong>{entry.author}:</strong> {entry.text}</p>)}</details>}</div> : rating && <div className="group-peek"><div><Users /><span>Noch keine weitere Gruppenbewertung</span></div></div>}</div><div className="dialog-actions">{rating && <button className="dialog-danger-button" disabled={saving} onClick={() => void reset()}><Trash2 /> Bewertung zurücksetzen</button>}<button className="text-button" disabled={saving} onClick={onClose}>Abbrechen</button><button className="primary-button" disabled={saving || (!stars && !skipped)} onClick={() => void submit()}><Check /> {saving ? "Wird gespeichert …" : "Bewertung speichern"}</button></div></section></div>;
 }
 
 function PieceRatingBadges({ rating, groupRating }: { rating?: Rating; groupRating?: GroupRating }) {
@@ -1129,12 +1193,20 @@ function BuilderDialog({ catalogue, setlist, pieceRatings, groupRatings, saveSta
   return <div className="dialog-backdrop builder-backdrop"><section className="dialog builder-dialog" role="dialog" aria-modal="true" aria-label="Setlist bearbeiten"><header className="builder-header"><div><span className="dialog-kicker"><Lock /> Privater Entwurf</span><input maxLength={120} value={setlist.name} onChange={(event) => onPatch({ name: event.target.value })} aria-label="Name der Setlist" />{saveState === "error" && setlist.name.trim() ? <button className={`builder-save-state ${saveState}`} onClick={onRetry} aria-live="polite"><CircleHelp />{saveLabel}</button> : <span className={`builder-save-state ${saveState}`} aria-live="polite">{saveState === "saving" ? <Activity /> : saveState === "error" ? <CircleHelp /> : <Check />}{saveLabel}</span>}</div><button className="dialog-close" onClick={onClose}><X /></button></header><div className="builder-layout"><div className="builder-main"><div className="builder-section-title"><div><h3>Programmfolge</h3><span>{setlist.pieceIds.length} Stücke · per Pfeil sortieren</span></div><button className="text-button" onClick={() => { const alternatives = artNames.filter((name) => name !== setlist.name); onPatch({ name: alternatives[Math.floor(Math.random() * alternatives.length)] }); }}><Shuffle /> Kunstname würfeln</button></div>{metrics.selected.length > 0 && <SetlistPlayer pieces={metrics.selected} compact />}<div className="builder-items">{metrics.selected.length === 0 && <div className="empty-builder"><ListMusic /><strong>Deine Bühne ist noch leer.</strong><span>Füge unten die ersten Stücke hinzu.</span></div>}{metrics.selected.map((piece, index) => <div className="builder-item" key={piece.id}><span className="order-number">{index + 1}</span><div className="builder-item-copy"><strong>{piece.title}</strong><span>{piece.composer}</span><div><em>{formatDuration(piece.durationSeconds)}</em><em>Grade {piece.grade}</em>{piece.genres[0] && <em>{piece.genres[0]}</em>}{piece.soloStatus === "available" && <em className="builder-solo"><UserRound /> Solo: {piece.solos || "Instrumente offen"}</em>}</div><PieceRatingBadges rating={pieceRatings[piece.id]} groupRating={groupRatings[piece.id]} /></div><div className="reorder"><button onClick={() => move(index, -1)} disabled={index === 0}><ArrowUp /></button><button onClick={() => move(index, 1)} disabled={index === metrics.selected.length - 1}><ArrowDown /></button></div><button className="remove-button" onClick={() => onPatch({ pieceIds: setlist.pieceIds.filter((id) => id !== piece.id) })}><Trash2 /></button></div>)}</div><div className="add-pieces"><div className="add-pieces-heading"><h3>Stück hinzufügen</h3><span>{candidates.length} verfügbar</span></div><label className="search-field"><Search /><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Titel oder Komponist suchen" /></label><div className="candidate-list">{candidates.map((piece) => <button key={piece.id} onClick={() => onPatch({ pieceIds: [...setlist.pieceIds, piece.id] })}><Plus /><div><strong>{piece.title}</strong><span>{piece.composer}</span><PieceRatingBadges rating={pieceRatings[piece.id]} groupRating={groupRatings[piece.id]} />{piece.soloStatus === "available" && <span className="candidate-solo"><UserRound /> Solo: {piece.solos || "Instrumente offen"}</span>}</div><em>{formatDuration(piece.durationSeconds)}</em></button>)}</div></div></div><aside className="builder-summary"><span className="eyebrow">Live-Check</span><h3>Passt das Programm?</h3><TimeSignal duration={metrics.duration} /><div className="summary-stat"><span><Clock3 /> Dauer</span><strong>{formatDuration(metrics.duration)}</strong></div><div className="summary-stat"><span><BarChart3 /> Schwierigkeit</span><strong>{metrics.minGrade || "–"}–{metrics.maxGrade || "–"}</strong><small>Ø {metrics.avgGrade ? metrics.avgGrade.toFixed(1).replace(".", ",") : "–"}</small></div><div className="summary-stat"><span><UserRound /> Solo-Stücke</span><strong>{soloCount}</strong></div><div className="summary-stat"><span><Euro /> Noch zu kaufen</span><strong>{formatMoney(metrics.cost)}</strong></div><div className="summary-genres"><span>Genre-Mix</span><div>{metrics.genres.length ? metrics.genres.map((item) => <em key={item}>{item}</em>) : <small>Noch keine Stücke gewählt</small>}</div></div><button className="primary-button publish-button" disabled={setlist.pieceIds.length === 0 || saveState === "error"} onClick={onPublish}><Sparkles /> Setlist veröffentlichen</button><small className="publish-note">Danach ist die Zusammenstellung gesperrt. Varianten bleiben jederzeit möglich.</small><button className="builder-delete-button" onClick={onDelete}><Trash2 /> Entwurf löschen</button></aside></div></section></div>;
 }
 
-function SetlistDialog({ catalogue, setlist, rating, pieceRatings, groupRatings, currentUserId, canDelete, onCopyLink, onClose, onDelete, onSave }: { catalogue: Piece[]; setlist: Setlist; rating?: SetlistRating; pieceRatings: Record<number, Rating>; groupRatings: Record<number, GroupRating>; currentUserId: string; canDelete: boolean; onCopyLink: () => void; onClose: () => void; onDelete: () => void; onSave: (rating: SetlistRating) => void }) {
+function SetlistDialog({ catalogue, setlist, rating, pieceRatings, groupRatings, currentUserId, canDelete, onCopyLink, onClose, onDelete, onReset, onSave }: { catalogue: Piece[]; setlist: Setlist; rating?: SetlistRating; pieceRatings: Record<number, Rating>; groupRatings: Record<number, GroupRating>; currentUserId: string; canDelete: boolean; onCopyLink: () => void; onClose: () => void; onDelete: () => void; onReset: () => Promise<boolean>; onSave: (rating: SetlistRating) => void }) {
   const [stars, setStars] = useState<number | null>(rating?.stars ?? null);
   const [comment, setComment] = useState(rating?.comment ?? "");
+  const [resetting, setResetting] = useState(false);
   const metrics = getMetrics(setlist.pieceIds, catalogue);
   const comments = setlist.reviews.filter((review) => review.comment);
   const isDraft = setlist.state === "draft";
+  const reset = async () => {
+    if (!window.confirm("Deine Setlist-Bewertung und dein Kommentar werden gelöscht. Möchtest du wirklich zurücksetzen?")) return;
+    setResetting(true);
+    const resetDone = await onReset();
+    setResetting(false);
+    if (resetDone) onClose();
+  };
   return <div className="dialog-backdrop" onMouseDown={(event) => event.target === event.currentTarget && onClose()}>
     <section className={`dialog setlist-dialog ${isDraft ? "draft-preview" : ""}`} role="dialog" aria-modal="true" aria-label={`${setlist.name} ${isDraft ? "ansehen" : "bewerten"}`}>
       <button className="dialog-close" onClick={onClose}><X /></button>
@@ -1153,7 +1225,7 @@ function SetlistDialog({ catalogue, setlist, rating, pieceRatings, groupRatings,
       <SetlistPlayer pieces={metrics.selected} />
       <ol className="setlist-dialog-pieces">{metrics.selected.map((piece, index) => <li key={piece.id}><b className="dialog-order">{index + 1}</b><div><strong>{piece.title}</strong><span>{piece.composer}</span><PieceRatingBadges rating={pieceRatings[piece.id]} groupRating={groupRatings[piece.id]} />{piece.soloStatus === "available" && <span className="dialog-solo"><UserRound /> Soli: {piece.solos || "Instrumente noch offen"}</span>}{piece.soloStatus === "unknown" && <span className="dialog-solo unknown"><CircleHelp /> Soli noch nicht erfasst</span>}</div><small>{formatDuration(piece.durationSeconds)}</small></li>)}</ol>
       {!isDraft && <><section className="setlist-discussion" aria-label="Gruppenbewertung"><div className="discussion-summary"><div><Users /><span>Gruppe · {setlist.ratingCount} {setlist.ratingCount === 1 ? "Bewertung" : "Bewertungen"}</span></div><strong>{setlist.ratingCount ? `Ø ${setlist.rating.toFixed(1).replace(".", ",")}` : "Noch keine Gruppenwertung"}</strong>{setlist.ratingCount > 0 && <Stars value={Math.round(setlist.rating)} small />}</div>{comments.length ? <div className="discussion-comments">{comments.map((review) => <article key={review.userId}><header><strong>{review.userId === currentUserId ? "Du" : review.author}</strong><span><Star fill="currentColor" /> {review.stars}/5</span></header><p>{review.comment}</p></article>)}</div> : <p className="discussion-empty">Noch keine Kommentare – du kannst die Diskussion eröffnen.</p>}</section><div className="rating-panel"><div className="rating-question"><span>Wie gut funktioniert diese Reihenfolge?</span><Stars value={stars} onChange={setStars} /></div><label><span>Dein Kommentar <small>optional und später änderbar</small></span><textarea value={comment} onChange={(event) => setComment(event.target.value)} placeholder="Dramaturgie, Dauer, Genre-Mix, Soli …" /></label></div></>}
-      <div className="dialog-actions">{canDelete && <button className="dialog-danger-button" onClick={onDelete}><Trash2 /> Setlist löschen</button>}<button className="text-button" onClick={onClose}>{isDraft ? "Schließen" : "Abbrechen"}</button>{!isDraft && <button className="primary-button" disabled={!stars} onClick={() => stars && onSave({ stars, comment })}><Check /> Bewertung speichern</button>}</div>
+      <div className="dialog-actions"><div className="dialog-danger-actions">{canDelete && <button className="dialog-danger-button" disabled={resetting} onClick={onDelete}><Trash2 /> Setlist löschen</button>}{rating && !isDraft && <button className="dialog-danger-button" disabled={resetting} onClick={() => void reset()}><X /> {resetting ? "Wird zurückgesetzt …" : "Bewertung zurücksetzen"}</button>}</div><button className="text-button" disabled={resetting} onClick={onClose}>{isDraft ? "Schließen" : "Abbrechen"}</button>{!isDraft && <button className="primary-button" disabled={resetting || !stars} onClick={() => stars && onSave({ stars, comment })}><Check /> Bewertung speichern</button>}</div>
     </section>
   </div>;
 }
