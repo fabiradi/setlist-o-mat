@@ -4,7 +4,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import type { Session, SupabaseClient } from "@supabase/supabase-js";
 import {
   Activity, ArrowDown, ArrowUp, BadgeCheck, BarChart3, Check, ChevronDown,
-  ChevronRight, CircleHelp, Clock3, Copy, Euro, FileMusic, Filter,
+  ChevronRight, CircleHelp, Clock3, Copy, Euro, FileMusic, Filter, KeyRound,
   Construction, Headphones, ListMusic, Lock, LogOut, MessageCircle,
   Music2, Pencil, Play, Plus, Power, Search, Settings, Shuffle, Sparkles,
   Star, Trash2, Trophy, UserRound, Users, X,
@@ -180,7 +180,9 @@ export default function Home() {
   const [allowedEmails, setAllowedEmails] = useState<AllowedEmail[]>([]);
   const [profileDisplayName, setProfileDisplayName] = useState<string | null>(null);
   const [profileNameConfirmedAt, setProfileNameConfirmedAt] = useState<string | null | undefined>(undefined);
+  const [passwordChangeRequired, setPasswordChangeRequired] = useState(false);
   const [showProfileDialog, setShowProfileDialog] = useState(false);
+  const [temporaryPassword, setTemporaryPassword] = useState<{ member: Member; password: string } | null>(null);
   const [search, setSearch] = useState("");
   const [genre, setGenre] = useState("Alle Genres");
   const [onlyOpen, setOnlyOpen] = useState(false);
@@ -249,6 +251,7 @@ export default function Home() {
           setOnlineMemberIds([]);
           setProfileDisplayName(null);
           setProfileNameConfirmedAt(undefined);
+          setPasswordChangeRequired(false);
         }
         return nextSession;
       });
@@ -292,13 +295,14 @@ export default function Home() {
     const loadProjectData = async () => {
       void supabase.from("profiles").update({ last_seen_at: new Date().toISOString() }).eq("id", session.user.id);
       const { data: currentProfile } = await supabase
-        .from("profiles").select("is_app_admin, display_name, name_confirmed_at").eq("id", session.user.id).single();
+        .from("profiles").select("is_app_admin, display_name, name_confirmed_at, password_change_required").eq("id", session.user.id).single();
       if (active) {
         setIsAdmin(Boolean(currentProfile?.is_app_admin));
         setProfileReady(true);
         setProfileDisplayName(currentProfile?.display_name ?? null);
         const confirmedAt = currentProfile?.name_confirmed_at ?? null;
         setProfileNameConfirmedAt(confirmedAt);
+        setPasswordChangeRequired(Boolean(currentProfile?.password_change_required));
         setShowProfileDialog(!confirmedAt);
       }
       const { data: dbPieces, error: piecesError } = await supabase
@@ -559,6 +563,15 @@ export default function Home() {
     flash(`Willkommen, ${normalizedName}!`);
     return null;
   };
+  const changeOwnPassword = async (password: string): Promise<string | null> => {
+    if (!supabase || !session) return "Dein Konto ist gerade nicht erreichbar.";
+    const { error } = await supabase.auth.updateUser({ password });
+    if (error) return friendlyAuthError(error.message, error.code);
+    const { error: profileError } = await supabase.from("profiles").update({ password_change_required: false, updated_at: new Date().toISOString() }).eq("id", session.user.id);
+    if (profileError) return "Das Passwort wurde geändert, aber die Bestätigung konnte nicht gespeichert werden. Bitte lade die App neu.";
+    setPasswordChangeRequired(false);
+    return null;
+  };
   const saveRating = async (pieceId: number, rating: Rating) => {
     const previousRating = ratings[pieceId];
     setRatings((current) => ({ ...current, [pieceId]: rating }));
@@ -685,8 +698,11 @@ export default function Home() {
     flash("Freigabe entfernt");
   };
   const deleteMember = async (member: Member) => {
-    if (!supabase || !isAdmin || member.id === session?.user.id || !window.confirm(`${member.displayName} wirklich vollständig löschen?`)) return;
-    const { data, error } = await supabase.functions.invoke("admin-delete-user", { body: { userId: member.id } });
+    const warning = `${member.displayName} wirklich vollständig löschen?\n\nDabei werden auch alle Bewertungen, Kommentare und eigenen Setlists dieses Kontos unwiderruflich gelöscht.`;
+    if (!supabase || !isAdmin || member.id === session?.user.id || !window.confirm(warning)) return;
+    const { data: authData } = await supabase.auth.getSession();
+    if (!authData.session) { flash("Deine Sitzung ist abgelaufen. Bitte melde dich erneut an."); return; }
+    const { data, error } = await supabase.functions.invoke("admin-delete-user", { body: { userId: member.id }, headers: { Authorization: `Bearer ${authData.session.access_token}` } });
     if (error || !data?.ok) {
       let reason = data?.error as string | undefined;
       const response = (error as { context?: Response } | null)?.context;
@@ -696,6 +712,20 @@ export default function Home() {
     }
     setMembers((current) => current.filter((item) => item.id !== member.id));
     flash("Nutzer gelöscht");
+  };
+  const resetMemberPassword = async (member: Member) => {
+    if (!supabase || !isAdmin || member.id === session?.user.id || !window.confirm(`Für ${member.displayName} ein neues temporäres Passwort erzeugen? Das bisherige Passwort funktioniert danach nicht mehr.`)) return;
+    const { data: authData } = await supabase.auth.getSession();
+    if (!authData.session) { flash("Deine Sitzung ist abgelaufen. Bitte melde dich erneut an."); return; }
+    const { data, error } = await supabase.functions.invoke("admin-reset-password", { body: { userId: member.id }, headers: { Authorization: `Bearer ${authData.session.access_token}` } });
+    if (error || !data?.ok || typeof data?.temporaryPassword !== "string") {
+      let reason = data?.error as string | undefined;
+      const response = (error as { context?: Response } | null)?.context;
+      if (!reason && response) reason = await response.clone().json().then((body) => body?.error as string | undefined).catch(() => undefined);
+      flash(reason || "Temporäres Passwort konnte nicht erzeugt werden");
+      return;
+    }
+    setTemporaryPassword({ member, password: data.temporaryPassword });
   };
   const savePieceMetadata = async (piece: Piece, patch: AdminPiecePatch) => {
     if (supabase && remotePieceIds[piece.id]) {
@@ -756,6 +786,7 @@ export default function Home() {
   if (!authReady || !maintenanceReady || (supabase && session && !profileReady)) return <div className="auth-loading"><AppMark /><strong>Setlist-o-Mat stimmt sich …</strong></div>;
   if (supabase && maintenance.enabled && (!session || !isAdmin)) return <MaintenanceScreen status={maintenance} signedIn={Boolean(session)} />;
   if (supabase && !session) return <LoginScreen supabase={supabase} initialMessage={authMessage} />;
+  if (supabase && session && passwordChangeRequired) return <RequiredPasswordScreen email={email} onSave={changeOwnPassword} onSignOut={() => void supabase.auth.signOut()} />;
 
   return <main className="app-shell">
     <aside className="side-nav">
@@ -819,7 +850,7 @@ export default function Home() {
             <div className="admin-piece-list">{adminPieces.map((piece) => { const missing = getMissingPieceFields(piece); return <button key={piece.id} onClick={() => setAdminEditId(piece.id)}><div><strong>{piece.title}</strong><span>{piece.composer}</span></div><div className="missing-tags">{missing.length ? missing.slice(0, 2).map((field) => <em key={field}>{field} fehlt</em>) : <em className="complete">Vollständig</em>}{missing.length > 2 && <em>+{missing.length - 2}</em>}<Pencil /></div></button>; })}</div>
             {!adminPieces.length && <p className="admin-empty">Keine passenden Stücke gefunden.</p>}
           </article>
-          <article className="content-card member-card"><div className="section-title"><div><span className="eyebrow">Teilnehmer</span><h2>Wer ist dabei?</h2></div><button className="icon-button" onClick={addAllowedEmail} aria-label="E-Mail freigeben"><Plus /></button></div>{sortedMembers.map((member, index) => { const online = onlineMemberIds.includes(member.id); const ratingProgress = catalogue.length ? Math.round(member.ratingsCompleted / catalogue.length * 100) : 0; return <div className={`member-row ${online ? "member-online" : ""}`} key={member.id}><div className={`avatar color-${index}`}>{member.displayName.split(" ").map((part) => part[0]).join("").slice(0, 2).toLocaleUpperCase("de")}</div><div className="member-copy"><strong><span className={`presence-dot ${online ? "online" : "offline"}`} />{member.displayName}</strong><span>{member.email}</span><span>{member.isAdmin ? "Administrator" : "Mitglied"} · {online ? "jetzt online" : `zuletzt ${formatLastActive(member.lastSeenAt)}`}</span><div className="member-progress"><i><b style={{ width: `${ratingProgress}%` }} /></i><small>{member.ratingsCompleted} von {catalogue.length} Stücken bearbeitet</small></div></div>{member.id !== session?.user.id ? <button className="icon-button" aria-label={`${member.displayName} löschen`} onClick={() => void deleteMember(member)}><Trash2 /></button> : <span className="self-label">Du</span>}</div>; })}{allowedEmails.filter((entry) => !members.some((member) => member.email.toLocaleLowerCase("de") === entry.email.toLocaleLowerCase("de"))).map((entry, index) => <div className="member-row" key={entry.email}><div className={`avatar color-${(members.length + index) % 6}`}>?</div><div><strong>{entry.displayName || entry.email}</strong><span>Freigabeliste · noch nie angemeldet</span></div><button className="icon-button" aria-label={`${entry.email} entfernen`} onClick={() => void removeAllowedEmail(entry.email)}><Trash2 /></button></div>)}</article>
+          <article className="content-card member-card"><div className="section-title"><div><span className="eyebrow">Teilnehmer</span><h2>Wer ist dabei?</h2></div><button className="icon-button" onClick={addAllowedEmail} aria-label="E-Mail freigeben"><Plus /></button></div>{sortedMembers.map((member, index) => { const online = onlineMemberIds.includes(member.id); const ratingProgress = catalogue.length ? Math.round(member.ratingsCompleted / catalogue.length * 100) : 0; return <div className={`member-row ${online ? "member-online" : ""}`} key={member.id}><div className={`avatar color-${index}`}>{member.displayName.split(" ").map((part) => part[0]).join("").slice(0, 2).toLocaleUpperCase("de")}</div><div className="member-copy"><strong><span className={`presence-dot ${online ? "online" : "offline"}`} />{member.displayName}</strong><span>{member.email}</span><span>{member.isAdmin ? "Administrator" : "Mitglied"} · {online ? "jetzt online" : `zuletzt ${formatLastActive(member.lastSeenAt)}`}</span><div className="member-progress"><i><b style={{ width: `${ratingProgress}%` }} /></i><small>{member.ratingsCompleted} von {catalogue.length} Stücken bearbeitet</small></div></div>{member.id !== session?.user.id ? <div className="member-actions"><button className="icon-button" title="Temporäres Passwort erzeugen" aria-label={`Temporäres Passwort für ${member.displayName} erzeugen`} onClick={() => void resetMemberPassword(member)}><KeyRound /></button><button className="icon-button danger" title="Nutzer vollständig löschen" aria-label={`${member.displayName} löschen`} onClick={() => void deleteMember(member)}><Trash2 /></button></div> : <span className="self-label">Du</span>}</div>; })}{allowedEmails.filter((entry) => !members.some((member) => member.email.toLocaleLowerCase("de") === entry.email.toLocaleLowerCase("de"))).map((entry, index) => <div className="member-row" key={entry.email}><div className={`avatar color-${(members.length + index) % 6}`}>?</div><div><strong>{entry.displayName || entry.email}</strong><span>Freigabeliste · noch nie angemeldet</span></div><button className="icon-button" aria-label={`${entry.email} entfernen`} onClick={() => void removeAllowedEmail(entry.email)}><Trash2 /></button></div>)}</article>
         </div>
       </div>}
     </section>
@@ -829,7 +860,8 @@ export default function Home() {
     {activeSetlist && <SetlistDialog catalogue={catalogue} setlist={activeSetlist} rating={setlistRatings[String(activeSetlist.id)]} currentUserId={session?.user.id ?? "demo-current"} onCopyLink={() => void copyCurrentLink()} onClose={closeSetlist} onSave={(rating) => { void saveSetlistRating(activeSetlist, rating); closeSetlist(); }} />}
     {builder && <BuilderDialog catalogue={catalogue} setlist={builder} saveState={setlistSaveState} onRetry={() => void flushSetlistSaves()} onClose={closeBuilder} onDelete={() => void deleteSetlist(builder)} onPatch={patchBuilder} onPublish={() => { patchBuilder({ state: "published" }); closeBuilder(); flash("Setlist veröffentlicht – jetzt darf bewertet werden"); }} />}
     {adminPiece && <AdminPieceDialog piece={adminPiece} onClose={() => setAdminEditId(null)} onSave={(patch) => savePieceMetadata(adminPiece, patch)} />}
-    {showProfileDialog && supabase && session && <ProfileNameDialog initialName={suggestedProfileName} required={!profileNameConfirmedAt} email={email} onClose={() => setShowProfileDialog(false)} onSave={saveProfileName} onChangePassword={async (password) => { const { error } = await supabase.auth.updateUser({ password }); return error ? friendlyAuthError(error.message, error.code) : null; }} />}
+    {showProfileDialog && supabase && session && <ProfileNameDialog initialName={suggestedProfileName} required={!profileNameConfirmedAt} email={email} onClose={() => setShowProfileDialog(false)} onSave={saveProfileName} onChangePassword={changeOwnPassword} />}
+    {temporaryPassword && <TemporaryPasswordDialog result={temporaryPassword} onClose={() => setTemporaryPassword(null)} onCopied={() => flash("Temporäres Passwort kopiert")} />}
     {toast && <div className="toast"><Check /> {toast}</div>}
   </main>;
 }
@@ -860,6 +892,31 @@ function LoginScreen({ supabase, initialMessage }: { supabase: SupabaseClient; i
 
   const signupReady = mode === "signin" || (displayName.trim().length >= 2 && signupCode.trim().length >= 6);
   return <main className="auth-page"><section className="auth-card"><div className="auth-brand"><AppMark /><div><strong>Setlist-o-Mat</strong><span>Gemeinsam. Klingt besser.</span></div></div><div className="auth-art" aria-hidden="true"><Music2 /><span>♪</span><i>✦</i></div><div className="auth-copy"><span className="eyebrow"><Sparkles /> Jahreskonzert 2027</span><h1>{mode === "signin" ? "Willkommen zurück." : "Komm in die Runde."}</h1><p>{mode === "signin" ? "Melde dich mit deiner E-Mail-Adresse und deinem Passwort an. Dafür wird keine Mail verschickt." : "Lege deinen Namen und ein Passwort fest. Du kannst danach sofort loslegen – ganz ohne Bestätigungsmail."}</p><div className="auth-tabs" role="tablist" aria-label="Anmeldung oder Registrierung"><button type="button" role="tab" aria-selected={mode === "signin"} className={mode === "signin" ? "active" : ""} onClick={() => { setMode("signin"); setMessage(null); }}>Anmelden</button><button type="button" role="tab" aria-selected={mode === "signup"} className={mode === "signup" ? "active" : ""} onClick={() => { setMode("signup"); setMessage(null); }}>Neu registrieren</button></div><form onSubmit={(event) => { event.preventDefault(); void submit(); }}>{mode === "signup" && <label><span>Dein Name</span><input autoComplete="name" type="text" required minLength={2} value={displayName} onChange={(event) => setDisplayName(event.target.value)} placeholder="Fabian Rademacher" /></label>}<label><span>E-Mail-Adresse</span><input autoComplete="email" inputMode="email" type="email" required value={email} onChange={(event) => setEmail(event.target.value)} placeholder="name@beispiel.de" /></label><label><span>Passwort <small>mindestens 8 Zeichen</small></span><input autoComplete={mode === "signin" ? "current-password" : "new-password"} type="password" required minLength={8} value={password} onChange={(event) => setPassword(event.target.value)} placeholder="Mindestens 8 Zeichen" /></label>{mode === "signup" && <label><span>Gruppencode <small>aus der WhatsApp-Gruppe</small></span><input autoComplete="off" spellCheck={false} type="text" required value={signupCode} onChange={(event) => setSignupCode(event.target.value.toLocaleUpperCase("de"))} placeholder="TAKT-……" /></label>}<button className="primary-button" disabled={busy || !email.trim() || password.length < 8 || !signupReady}>{busy ? "Einen Moment …" : mode === "signin" ? "Anmelden" : "Konto anlegen"}<ChevronRight /></button></form>{message && <div className="auth-message"><CircleHelp />{message}</div>}<div className="auth-hint"><BadgeCheck /><span><strong>@musikverein-verl.de</strong> ist automatisch freigeschaltet. Andere Adressen müssen zusätzlich auf der Freigabeliste stehen.</span></div><p className="auth-support">Passwort vergessen oder bisher nur per Mail-Link angemeldet? Melde dich kurz bei Fabian.</p></div></section></main>;
+}
+
+function RequiredPasswordScreen({ email, onSave, onSignOut }: { email: string; onSave: (password: string) => Promise<string | null>; onSignOut: () => void }) {
+  const [password, setPassword] = useState("");
+  const [passwordRepeat, setPasswordRepeat] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [message, setMessage] = useState<string | null>(null);
+  const submit = async () => {
+    setMessage(null);
+    if (password.length < 8) { setMessage("Das Passwort muss mindestens acht Zeichen lang sein."); return; }
+    if (password !== passwordRepeat) { setMessage("Die beiden Passwörter stimmen nicht überein."); return; }
+    setBusy(true);
+    const error = await onSave(password);
+    setBusy(false);
+    if (error) setMessage(error);
+  };
+  return <main className="auth-page"><section className="password-required-card"><div className="profile-icon"><KeyRound /></div><span className="eyebrow"><Sparkles /> Einmaliger Sicherheitscheck</span><h1>Lege dein eigenes Passwort fest.</h1><p>Du hast dich mit einem temporären Passwort angemeldet. Bevor es weitergeht, ersetze es durch ein persönliches Passwort.</p><small>{email}</small><form onSubmit={(event) => { event.preventDefault(); void submit(); }}><label><span>Neues Passwort</span><input autoComplete="new-password" type="password" required minLength={8} value={password} onChange={(event) => setPassword(event.target.value)} placeholder="Mindestens 8 Zeichen" /></label><label><span>Passwort wiederholen</span><input autoComplete="new-password" type="password" required minLength={8} value={passwordRepeat} onChange={(event) => setPasswordRepeat(event.target.value)} placeholder="Noch einmal eingeben" /></label>{message && <div className="auth-message"><CircleHelp /> {message}</div>}<button className="primary-button" disabled={busy || !password || !passwordRepeat}>{busy ? "Wird gespeichert …" : "Neues Passwort speichern"}<Check /></button><button type="button" className="text-button" onClick={onSignOut}>Abmelden</button></form></section></main>;
+}
+
+function TemporaryPasswordDialog({ result, onClose, onCopied }: { result: { member: Member; password: string }; onClose: () => void; onCopied: () => void }) {
+  const copy = async () => {
+    try { await navigator.clipboard.writeText(result.password); onCopied(); }
+    catch { window.prompt("Temporäres Passwort kopieren:", result.password); }
+  };
+  return <div className="dialog-backdrop profile-backdrop"><section className="dialog temporary-password-dialog" role="dialog" aria-modal="true" aria-label="Temporäres Passwort"><button className="dialog-close" onClick={onClose} aria-label="Schließen"><X /></button><div className="profile-icon"><KeyRound /></div><span className="dialog-kicker"><Sparkles /> Einmalig anzeigen</span><h2>Temporäres Passwort</h2><p>Schicke dieses Passwort an <strong>{result.member.displayName}</strong> über WhatsApp. Nach der Anmeldung muss es sofort geändert werden.</p><label><span>{result.member.email}</span><div className="temporary-password-value"><code>{result.password}</code><button type="button" onClick={() => void copy()}><Copy /> Kopieren</button></div></label><div className="profile-success"><BadgeCheck /> Das bisherige Passwort ist nicht mehr gültig.</div><div className="dialog-actions"><button className="primary-button" onClick={onClose}>Fertig</button></div></section></div>;
 }
 
 function ProfileNameDialog({ initialName, required, email, onClose, onSave, onChangePassword }: { initialName: string; required: boolean; email: string; onClose: () => void; onSave: (name: string) => Promise<string | null>; onChangePassword: (password: string) => Promise<string | null> }) {
