@@ -510,4 +510,25 @@ small {
   }
 }
 
+.solo-chip.none { background: #ece9e5; color: #6f6875 !important; }
+.setlist-preview-solo.unknown { color: #866100; background: var(--yellow-soft); }
+.candidate-list .candidate-solo.unknown { color: #866100; }
+.builder-item-copy em.builder-solo.unknown { color: #866100; background: var(--yellow-soft); }
+
+.solo-status-field { grid-column: 1/-1; min-width: 0; margin: 0; padding: 0; border: 0; }
+.solo-status-field legend { margin-bottom: 7px; font-size: 12px; font-weight: 750; }
+.solo-status-picker { display: grid; grid-template-columns: repeat(3, minmax(0,1fr)); gap: 7px; }
+.solo-status-option { min-height: 48px; border: 1px solid var(--line); border-radius: 11px; background: #fff; color: var(--muted); padding: 8px 10px; display: flex; align-items: center; justify-content: center; gap: 7px; cursor: pointer; font-size: 12px; font-weight: 750; text-align: center; }
+.solo-status-option svg { width: 16px; height: 16px; flex: none; }
+.solo-status-option.unknown.active { border-color: #d7a924; color: #866100; background: var(--yellow-soft); }
+.solo-status-option.none.active { border-color: #aaa3ad; color: #5f5867; background: #ece9e5; }
+.solo-status-option.available.active { border-color: var(--coral); color: #a9412c; background: var(--coral-soft); }
+.solo-status-option:not(.active):hover { border-color: #c9c1ce; background: #faf8f5; }
+.solo-instruments-field small { color: var(--muted); font-weight: 450; }
+
+@media (max-width: 520px) {
+  .solo-status-picker { grid-template-columns: 1fr; }
+  .solo-status-option { justify-content: flex-start; }
+}
+
 @media (prefers-reduced-motion: reduce) { *, *:before, *:after { scroll-behavior: auto !important; animation: none !important; transition: none !important; } }
