@@ -162,6 +162,9 @@ function piecesHash(search: string, genre: string, onlyOpen: boolean, sort: Piec
   if (sort !== "title") params.set("sort", sort);
   return `stuecke${params.size ? `?${params.toString()}` : ""}`;
 }
+function pieceDetailHash(pieceId: number, search: string, genre: string, onlyOpen: boolean, sort: PieceSort = "title") {
+  return piecesHash(search, genre, onlyOpen, sort).replace("stuecke", `stuecke/${pieceId}`);
+}
 function setlistsHash(filter: SetlistFilter) { return `setlists${filter === "all" ? "" : `?filter=${filter}`}`; }
 function getMissingPieceFields(piece: Piece) {
   return [
@@ -576,7 +579,11 @@ export default function Home() {
     setView(nextView); setActivePieceId(null); setActiveSetlistId(null); setBuilderId(null);
     writeAppHash(nextView === "home" ? "uebersicht" : nextView === "pieces" ? piecesHash(search, genre, onlyOpen, pieceSort) : nextView === "setlists" ? setlistsHash(setlistFilter) : "admin");
   };
-  const openPiece = (pieceId: number) => { setView("pieces"); setActivePieceId(pieceId); setActiveSetlistId(null); setBuilderId(null); writeAppHash(`stuecke/${pieceId}`); };
+  const openPiece = (pieceId: number) => {
+    const preserveFilters = view === "pieces";
+    setView("pieces"); setActivePieceId(pieceId); setActiveSetlistId(null); setBuilderId(null);
+    writeAppHash(pieceDetailHash(pieceId, preserveFilters ? search : "", preserveFilters ? genre : "Alle Genres", preserveFilters && onlyOpen, preserveFilters ? pieceSort : "title"));
+  };
   const closePiece = () => { setActivePieceId(null); writeAppHash(piecesHash(search, genre, onlyOpen, pieceSort), true); };
   const openSetlist = (setlistId: number | string) => { setView("setlists"); setActiveSetlistId(setlistId); setActivePieceId(null); setBuilderId(null); writeAppHash(`setlists/${encodeURIComponent(String(setlistId))}`); };
   const closeSetlist = () => { setActiveSetlistId(null); writeAppHash(setlistsHash(setlistFilter), true); };
