@@ -1,3 +1,5 @@
+[![GitHub Pages](https://github.com/fabiradi/setlist-o-mat/actions/workflows/pages.yml/badge.svg)](https://github.com/fabiradi/setlist-o-mat/actions/workflows/pages.yml)
+
 # Setlist-o-Mat
 
 Der Setlist-o-Mat hilft einer Gruppe dabei, Konzertstücke zu bewerten, Setlist-Entwürfe zusammenzustellen und gemeinsam eine finale Reihenfolge zu finden.
