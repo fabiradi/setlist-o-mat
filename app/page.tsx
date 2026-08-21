@@ -84,6 +84,11 @@ const pieces = rawPieces as Piece[];
 const TARGET_MIN = 25 * 60;
 const TARGET_MAX = 30 * 60;
 const ACTIVE_PROJECT_ID = "20270000-0000-4000-8000-000000000001";
+const emptyPiece: Piece = {
+  id: 0, title: "Neues Stück", composer: "", durationSeconds: 0, grade: 0,
+  priceCents: 0, owned: false, genres: [], sampleUrl: null, youtubeId: null,
+  purchaseUrl: null, soloStatus: "unknown", solos: null, source: "", note: null,
+};
 const RETURN_HASH_KEY = "setlist-o-mat:return-hash";
 const initialRatings: Record<number, Rating> = {
   2: { stars: 4, skipped: false, comment: "Schöner Einstieg, aber recht lang." },
@@ -249,6 +254,7 @@ export default function Home() {
   const [onlyOpen, setOnlyOpen] = useState(false);
   const [pieceSort, setPieceSort] = useState<PieceSort>("title");
   const [adminEditId, setAdminEditId] = useState<number | null>(null);
+  const [adminCreatingPiece, setAdminCreatingPiece] = useState(false);
   const [adminPieceSearch, setAdminPieceSearch] = useState("");
   const [adminOnlyIncomplete, setAdminOnlyIncomplete] = useState(false);
   const [setlistSaveState, setSetlistSaveState] = useState<SetlistSaveState>("idle");
@@ -378,7 +384,7 @@ export default function Home() {
       if (piecesError || !dbPieces) { if (active) setToast("Supabase-Daten konnten nicht geladen werden"); return; }
 
       const pieceIds = Object.fromEntries(dbPieces.flatMap((piece) => {
-        const match = /^xlsx-(\d+)$/.exec(piece.import_key ?? "");
+        const match = /^(?:xlsx|manual)-(\d+)$/.exec(piece.import_key ?? "");
         return match ? [[Number(match[1]), piece.id as string]] : [];
       })) as Record<number, string>;
       const localByRemote = new Map(Object.entries(pieceIds).map(([local, remote]) => [remote, Number(local)]));
@@ -400,7 +406,7 @@ export default function Home() {
       if (!active) return;
       setRemotePieceIds(pieceIds);
       const mappedPieces = dbPieces.flatMap((piece) => {
-        const match = /^xlsx-(\d+)$/.exec(piece.import_key ?? "");
+        const match = /^(?:xlsx|manual)-(\d+)$/.exec(piece.import_key ?? "");
         if (!match) return [];
         const localId = Number(match[1]);
         return [{
@@ -901,6 +907,38 @@ export default function Home() {
     flash("Metadaten gespeichert");
     return true;
   };
+  const createPiece = async (patch: AdminPiecePatch) => {
+    if (!supabase || !session || !isAdmin) return false;
+    const localId = Math.max(0, ...catalogue.map((piece) => piece.id)) + 1;
+    const { data, error } = await supabase.from("pieces").insert({
+      project_id: ACTIVE_PROJECT_ID,
+      import_key: `manual-${localId}`,
+      title: patch.title,
+      composer: patch.composer,
+      genres: patch.genres,
+      sample_url: patch.sampleUrl,
+      purchase_url: patch.purchaseUrl,
+      solo_status: patch.soloStatus,
+      solos: patch.solos,
+      duration_seconds: patch.durationSeconds,
+      grade: patch.grade,
+      price_cents: patch.priceCents,
+      owned: patch.owned,
+      source: patch.source,
+      note: patch.note,
+    }).select("id").single();
+    if (error || !data) {
+      console.error("piece creation failed", error);
+      flash("Stück konnte nicht angelegt werden");
+      return false;
+    }
+    const createdPiece: Piece = { id: localId, ...patch, youtubeId: getYoutubeId(patch.sampleUrl) };
+    setRemotePieces((current) => [...current, createdPiece].sort((a, b) => a.title.localeCompare(b.title, "de")));
+    setRemotePieceIds((current) => ({ ...current, [localId]: data.id as string }));
+    setAdminCreatingPiece(false);
+    flash("Stück angelegt");
+    return true;
+  };
   const toggleMaintenance = async () => {
     if (!supabase || !session || !isAdmin) return;
     const nextEnabled = !maintenance.enabled;
@@ -995,7 +1033,7 @@ export default function Home() {
         <div className="admin-metrics"><article><div className="metric-icon coral"><CircleHelp /></div><div><strong>{catalogue.filter((piece) => piece.soloStatus === "unknown").length}</strong><span>Soli noch offen</span></div></article><article><div className="metric-icon yellow"><Filter /></div><div><strong>{catalogue.filter((piece) => piece.genres.length === 0).length}</strong><span>Genres fehlen</span></div></article><article><div className="metric-icon purple"><Activity /></div><div><strong>{onlineMembers.length}</strong><span>Gerade online</span></div></article><article><div className="metric-icon green"><BadgeCheck /></div><div><strong>{catalogue.filter((piece) => piece.owned).length}</strong><span>Stücke im Bestand</span></div></article></div>
         <div className="admin-columns">
           <article className="content-card admin-table-card">
-            <div className="section-title"><div><span className="eyebrow">Stückdaten</span><h2>Gesamter Katalog</h2></div><span className="status-pill draft">{incompletePieceCount} unvollständig</span></div>
+            <div className="section-title"><div><span className="eyebrow">Stückdaten</span><h2>Gesamter Katalog</h2></div><div className="admin-catalog-actions"><span className="status-pill draft">{incompletePieceCount} unvollständig</span><button className="icon-button" onClick={() => setAdminCreatingPiece(true)} title="Neues Stück" aria-label="Neues Stück anlegen"><Plus /></button></div></div>
             <div className="admin-piece-controls"><label className="search-field"><Search /><input value={adminPieceSearch} onChange={(event) => setAdminPieceSearch(event.target.value)} placeholder="Titel, Komponist, Quelle …" /></label><button className={adminOnlyIncomplete ? "toggle active" : "toggle"} onClick={() => setAdminOnlyIncomplete((value) => !value)}><Filter /> Nur unvollständige</button></div>
             <div className="admin-piece-list">{adminPieces.map((piece) => { const missing = getMissingPieceFields(piece); return <button key={piece.id} onClick={() => setAdminEditId(piece.id)}><div><strong>{piece.title}</strong><span>{piece.composer}</span></div><div className="missing-tags">{missing.length ? missing.slice(0, 2).map((field) => <em key={field}>{field} fehlt</em>) : <em className="complete">Vollständig</em>}{missing.length > 2 && <em>+{missing.length - 2}</em>}<Pencil /></div></button>; })}</div>
             {!adminPieces.length && <p className="admin-empty">Keine passenden Stücke gefunden.</p>}
@@ -1010,6 +1048,7 @@ export default function Home() {
     {activeSetlist && <SetlistDialog catalogue={catalogue} setlist={activeSetlist} rating={setlistRatings[String(activeSetlist.id)]} pieceRatings={ratings} groupRatings={groupRatings} currentUserId={session?.user.id ?? "demo-current"} canDelete={!supabase || activeSetlist.ownerId === session?.user.id || isAdmin} onCopyLink={() => void copyCurrentLink()} onClose={closeSetlist} onDelete={() => void deleteSetlist(activeSetlist)} onReset={() => resetSetlistRating(activeSetlist)} onSave={(rating) => { void saveSetlistRating(activeSetlist, rating); closeSetlist(); }} />}
     {builder && <BuilderDialog catalogue={catalogue} setlist={builder} pieceRatings={ratings} groupRatings={groupRatings} saveState={setlistSaveState} onRetry={() => void flushSetlistSaves()} onClose={closeBuilder} onDelete={() => void deleteSetlist(builder)} onPatch={patchBuilder} onPublish={() => { patchBuilder({ state: "published" }); closeBuilder(); flash("Setlist veröffentlicht – jetzt darf bewertet werden"); }} />}
     {adminPiece && <AdminPieceDialog piece={adminPiece} onClose={() => setAdminEditId(null)} onSave={(patch) => savePieceMetadata(adminPiece, patch)} />}
+    {adminCreatingPiece && <AdminPieceDialog piece={emptyPiece} creating onClose={() => setAdminCreatingPiece(false)} onSave={createPiece} />}
     {showProfileDialog && supabase && session && <ProfileNameDialog initialName={suggestedProfileName} required={!profileNameConfirmedAt} email={email} onClose={() => setShowProfileDialog(false)} onSave={saveProfileName} onChangePassword={changeOwnPassword} />}
     {temporaryPassword && <TemporaryPasswordDialog result={temporaryPassword} onClose={() => setTemporaryPassword(null)} onCopied={() => flash("Temporäres Passwort kopiert")} />}
     {toast && <div className="toast"><Check /> {toast}</div>}
@@ -1230,16 +1269,16 @@ function SetlistDialog({ catalogue, setlist, rating, pieceRatings, groupRatings,
   </div>;
 }
 
-function AdminPieceDialog({ piece, onClose, onSave }: { piece: Piece; onClose: () => void; onSave: (patch: AdminPiecePatch) => Promise<boolean> }) {
-  const [title, setTitle] = useState(piece.title);
+function AdminPieceDialog({ piece, creating = false, onClose, onSave }: { piece: Piece; creating?: boolean; onClose: () => void; onSave: (patch: AdminPiecePatch) => Promise<boolean> }) {
+  const [title, setTitle] = useState(creating ? "" : piece.title);
   const [composer, setComposer] = useState(piece.composer);
   const [genreText, setGenreText] = useState(piece.genres.join(", "));
   const [sampleUrl, setSampleUrl] = useState(piece.sampleUrl ?? "");
   const [purchaseUrl, setPurchaseUrl] = useState(piece.purchaseUrl ?? "");
   const [soloStatus, setSoloStatus] = useState<Piece["soloStatus"]>(piece.soloStatus);
   const [solos, setSolos] = useState(piece.solos ?? "");
-  const [duration, setDuration] = useState(formatDuration(piece.durationSeconds));
-  const [grade, setGrade] = useState(String(piece.grade));
+  const [duration, setDuration] = useState(piece.durationSeconds ? formatDuration(piece.durationSeconds) : "");
+  const [grade, setGrade] = useState(piece.grade ? String(piece.grade) : "");
   const [price, setPrice] = useState((piece.priceCents / 100).toFixed(2).replace(".", ","));
   const [owned, setOwned] = useState(piece.owned);
   const [source, setSource] = useState(piece.source);
