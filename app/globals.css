@@ -246,11 +246,26 @@ svg { width: 20px; height: 20px; stroke-width: 2; }
 .add-pieces-toggle svg:last-child { margin-left: 2px; transition: transform .18s ease; }
 .add-pieces-toggle svg.open { transform: rotate(180deg); }
 .add-pieces { margin-top: 14px; }
+.builder-draft-status { width: fit-content; display: inline-flex; align-items: center; gap: 6px; border: 1px solid #cfc3f1; border-radius: 9px; padding: 6px 9px; background: var(--purple-soft); color: var(--purple-dark); font-size: 11px; font-weight: 800; }
+.builder-draft-status svg { width: 14px; height: 14px; }
+.builder-title-row { width: calc(100% - 50px); display: grid; grid-template-columns: auto minmax(0,1fr); align-items: center; gap: 9px; margin-top: 7px; }
+.builder-title-row > svg { width: 23px; height: 23px; color: var(--purple); }
+.builder-title-row input { margin-top: 0; width: 100%; }
+.setlist-dialog-title { display: flex; align-items: center; gap: 9px; }
+.setlist-dialog-title > svg { width: 25px; height: 25px; flex: none; color: var(--purple); }
+.builder-piece-title { display: flex !important; align-items: baseline; gap: 7px; flex-wrap: wrap; }
+.builder-piece-title > span { display: inline-flex; align-items: center; gap: 3px; color: var(--muted); font-size: 10px; font-weight: 500; white-space: nowrap; }
+.builder-piece-title > span svg { width: 12px; height: 12px; }
+.builder-item-copy em.builder-genre { color: var(--purple-dark); background: var(--purple-soft); }
+.builder-item-actions .piece-rating-badges { display: flex; align-items: center; gap: 12px; }
+.builder-item-actions .piece-rating-badges .group { order: 1; }
+.builder-item-actions .piece-rating-badges .mine { order: 2; }
+.piece-rating-badges .rating-count { margin-left: -2px !important; }
 
 @media (max-width: 760px) {
   .builder-item { grid-template-columns: auto minmax(0,1fr); }
   .builder-item-actions { grid-column: 2; width: 100%; grid-template-columns: minmax(0,1fr) auto auto; align-items: center; justify-items: start; gap: 8px; }
-  .builder-item-actions .piece-rating-badges { grid-column: 1; grid-row: 1; justify-items: start; margin: 0; }
+  .builder-item-actions .piece-rating-badges { grid-column: 1; grid-row: 1; display: grid; justify-items: start; margin: 0; gap: 4px; }
   .builder-item-controls { grid-column: 2; grid-row: 1; }
   .builder-item-duration { grid-column: 3; grid-row: 1; justify-self: end; white-space: nowrap; }
   .builder-item-controls .reorder, .builder-item-controls .remove-button { grid-column: auto; grid-row: auto; }
