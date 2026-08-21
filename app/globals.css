@@ -607,4 +607,29 @@ small {
   .composer-genre-row, .piece-commercial-row { grid-template-columns: 1fr; }
 }
 
+/* Setlist-Einträge und bewusst gestartete Hörproben */
+.builder-piece-count { color: var(--muted); font-size: 12px; font-weight: 750; }
+.builder-piece-count:after { content: ""; display: inline-block; width: 1px; height: 13px; margin-left: 10px; vertical-align: -2px; background: var(--line); }
+.builder-item-copy .builder-piece-title { font-size: 18px; line-height: 1.25; }
+.builder-piece-title > span { font-size: 12px; }
+.builder-item-actions .piece-rating-badges .mine { order: 1; }
+.builder-item-actions .piece-rating-badges .group { order: 2; }
+.piece-rating-badges .rating-count { margin-left: -2px !important; color: var(--muted) !important; font-weight: 650; }
+.player-placeholder { min-height: 190px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 7px; padding: 24px; color: #fff; text-align: center; }
+.player-placeholder > svg { width: 34px; height: 34px; color: var(--coral); }
+.player-placeholder > strong { font-size: 15px; }
+.player-placeholder > span { max-width: 390px; color: #c7bfce; font-size: 12px; line-height: 1.45; }
+.builder-order-column, .dialog-order-column { display: flex; flex-direction: column; align-items: center; gap: 4px; }
+.builder-playing, .dialog-playing { width: 13px; height: 13px; color: var(--coral); }
+.builder-item.active-preview, .setlist-dialog-pieces li.active-preview { border-color: var(--coral); background: var(--coral-soft); box-shadow: inset 3px 0 0 var(--coral); }
+.builder-item:has(.builder-item-copy) { cursor: pointer; }
+.setlist-dialog-pieces li { cursor: pointer; }
+.setlist-dialog-pieces li.active-preview .dialog-order { background: var(--coral); color: #fff; }
+
+@media (max-width: 760px) {
+  .builder-item-actions .piece-rating-badges .mine { order: 1; }
+  .builder-item-actions .piece-rating-badges .group { order: 2; }
+  .builder-piece-count:after { display: none; }
+}
+
 @media (prefers-reduced-motion: reduce) { *, *:before, *:after { scroll-behavior: auto !important; animation: none !important; transition: none !important; } }
