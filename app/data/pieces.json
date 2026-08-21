@@ -7,14 +7,17 @@
     "grade": 2.5,
     "priceCents": 6900,
     "owned": false,
-    "genres": ["Konzertwerk"],
+    "genres": [
+      "Konzertwerk"
+    ],
     "sampleUrl": null,
     "youtubeId": null,
     "purchaseUrl": null,
     "soloStatus": "none",
     "solos": null,
     "source": "Demodaten",
-    "note": null
+    "note": null,
+    "subtitle": null
   },
   {
     "id": 2,
@@ -24,14 +27,17 @@
     "grade": 3,
     "priceCents": 0,
     "owned": true,
-    "genres": ["Funk"],
+    "genres": [
+      "Funk"
+    ],
     "sampleUrl": null,
     "youtubeId": null,
     "purchaseUrl": null,
     "soloStatus": "available",
     "solos": "Altsaxophon oder Trompete",
     "source": "Demodaten",
-    "note": null
+    "note": null,
+    "subtitle": null
   },
   {
     "id": 3,
@@ -41,14 +47,17 @@
     "grade": 3.5,
     "priceCents": 9800,
     "owned": false,
-    "genres": ["Filmmusik"],
+    "genres": [
+      "Filmmusik"
+    ],
     "sampleUrl": null,
     "youtubeId": null,
     "purchaseUrl": null,
     "soloStatus": "unknown",
     "solos": null,
     "source": "Demodaten",
-    "note": "Beispiel für noch offene Soli-Angaben"
+    "note": null,
+    "subtitle": "Beispiel für noch offene Soli-Angaben"
   },
   {
     "id": 4,
@@ -58,14 +67,17 @@
     "grade": 2,
     "priceCents": 7400,
     "owned": false,
-    "genres": ["Polka"],
+    "genres": [
+      "Polka"
+    ],
     "sampleUrl": null,
     "youtubeId": null,
     "purchaseUrl": null,
     "soloStatus": "available",
     "solos": "Tenorhorn",
     "source": "Demodaten",
-    "note": null
+    "note": null,
+    "subtitle": null
   },
   {
     "id": 5,
@@ -75,14 +87,17 @@
     "grade": 3,
     "priceCents": 8600,
     "owned": false,
-    "genres": ["Rock/Pop"],
+    "genres": [
+      "Rock/Pop"
+    ],
     "sampleUrl": null,
     "youtubeId": null,
     "purchaseUrl": null,
     "soloStatus": "none",
     "solos": null,
     "source": "Demodaten",
-    "note": null
+    "note": null,
+    "subtitle": null
   },
   {
     "id": 6,
@@ -92,14 +107,17 @@
     "grade": 2.5,
     "priceCents": 0,
     "owned": true,
-    "genres": ["Walzer"],
+    "genres": [
+      "Walzer"
+    ],
     "sampleUrl": null,
     "youtubeId": null,
     "purchaseUrl": null,
     "soloStatus": "available",
     "solos": "Flöte oder Oboe",
     "source": "Demodaten",
-    "note": null
+    "note": null,
+    "subtitle": null
   },
   {
     "id": 7,
@@ -109,14 +127,17 @@
     "grade": 3.5,
     "priceCents": 9200,
     "owned": false,
-    "genres": ["Jazz"],
+    "genres": [
+      "Jazz"
+    ],
     "sampleUrl": null,
     "youtubeId": null,
     "purchaseUrl": null,
     "soloStatus": "available",
     "solos": "Trompete, Posaune oder Saxophon",
     "source": "Demodaten",
-    "note": null
+    "note": null,
+    "subtitle": null
   },
   {
     "id": 8,
@@ -126,14 +147,17 @@
     "grade": 4,
     "priceCents": 11900,
     "owned": false,
-    "genres": ["Konzertwerk"],
+    "genres": [
+      "Konzertwerk"
+    ],
     "sampleUrl": null,
     "youtubeId": null,
     "purchaseUrl": null,
     "soloStatus": "unknown",
     "solos": null,
     "source": "Demodaten",
-    "note": null
+    "note": null,
+    "subtitle": null
   },
   {
     "id": 9,
@@ -143,14 +167,17 @@
     "grade": 2.5,
     "priceCents": 7800,
     "owned": false,
-    "genres": ["Game Music"],
+    "genres": [
+      "Game Music"
+    ],
     "sampleUrl": null,
     "youtubeId": null,
     "purchaseUrl": null,
     "soloStatus": "none",
     "solos": null,
     "source": "Demodaten",
-    "note": null
+    "note": null,
+    "subtitle": null
   },
   {
     "id": 10,
@@ -160,14 +187,17 @@
     "grade": 2,
     "priceCents": 0,
     "owned": true,
-    "genres": ["Ballade"],
+    "genres": [
+      "Ballade"
+    ],
     "sampleUrl": null,
     "youtubeId": null,
     "purchaseUrl": null,
     "soloStatus": "available",
     "solos": "Flügelhorn oder Euphonium",
     "source": "Demodaten",
-    "note": null
+    "note": null,
+    "subtitle": null
   },
   {
     "id": 11,
@@ -177,14 +207,17 @@
     "grade": 3.5,
     "priceCents": 8900,
     "owned": false,
-    "genres": ["Latin"],
+    "genres": [
+      "Latin"
+    ],
     "sampleUrl": null,
     "youtubeId": null,
     "purchaseUrl": null,
     "soloStatus": "available",
     "solos": "Percussion und Trompete",
     "source": "Demodaten",
-    "note": null
+    "note": null,
+    "subtitle": null
   },
   {
     "id": 12,
@@ -194,13 +227,16 @@
     "grade": 2.5,
     "priceCents": 6500,
     "owned": false,
-    "genres": ["Marsch"],
+    "genres": [
+      "Marsch"
+    ],
     "sampleUrl": null,
     "youtubeId": null,
     "purchaseUrl": null,
     "soloStatus": "none",
     "solos": null,
     "source": "Demodaten",
-    "note": null
+    "note": null,
+    "subtitle": null
   }
 ]
