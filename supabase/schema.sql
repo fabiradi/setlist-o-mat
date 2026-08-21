@@ -93,6 +93,7 @@ create table public.pieces (
   solo_status public.solo_status not null default 'unknown',
   solos text,
   source text not null default '',
+  subtitle text,
   note text,
   archived boolean not null default false,
   created_at timestamptz not null default now(),
