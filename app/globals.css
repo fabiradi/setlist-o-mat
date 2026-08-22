@@ -828,3 +828,71 @@ small {
   .piece-row { grid-template-columns: auto minmax(0,1fr) auto; }
   .rating-cell { grid-column: 2/-1; }
 }
+
+/* Stabiles Metadaten-/Aktionsraster in Setlist-Einträgen */
+.builder-title-row { padding-top: 0; }
+.builder-title-row:before { content: none; }
+.builder-item-actions,
+.builder-item:not(.setlist-view-item) .builder-item-actions,
+.setlist-view-item .builder-item-actions {
+  display: grid;
+  grid-template-columns: auto auto auto;
+  grid-template-rows: auto auto;
+  align-items: center;
+  justify-content: end;
+  justify-items: end;
+  column-gap: 7px;
+  row-gap: 6px;
+}
+.builder-item-actions > .builder-rating-line { display: contents; }
+.builder-item-actions > .builder-rating-line > .piece-rating-badges {
+  grid-column: 1/-1;
+  grid-row: 1;
+  margin: 0;
+}
+.builder-item-actions > .builder-rating-line > .piece-comments-toggle {
+  grid-column: 1;
+  grid-row: 2;
+  justify-self: end;
+  align-self: center;
+}
+.builder-item-actions .builder-item-duration,
+.builder-item:not(.setlist-view-item) .builder-item-duration,
+.setlist-view-item .builder-item-duration {
+  grid-column: 2;
+  grid-row: 2;
+  margin: 0;
+  white-space: nowrap;
+}
+.builder-item:not(.setlist-view-item) .builder-item-controls {
+  grid-column: 3;
+  grid-row: 2;
+  margin-left: 5px;
+  padding-left: 8px;
+  border-left: 1px solid var(--line);
+}
+.piece-comments-toggle[open] { z-index: 60; }
+.piece-comments-toggle[open] > div { z-index: 61; }
+
+@media (max-width: 760px) {
+  .builder-item-actions,
+  .builder-item:not(.setlist-view-item) .builder-item-actions,
+  .setlist-view-item .builder-item-actions {
+    grid-template-columns: auto auto minmax(0,1fr) auto;
+    width: 100%;
+    justify-content: stretch;
+    justify-items: start;
+    column-gap: 6px;
+    row-gap: 5px;
+  }
+  .builder-item-actions > .builder-rating-line > .piece-rating-badges { grid-column: 1/-1; }
+  .builder-item-actions > .builder-rating-line > .piece-comments-toggle { grid-column: 1; justify-self: start; }
+  .builder-item-actions .builder-item-duration,
+  .builder-item:not(.setlist-view-item) .builder-item-duration,
+  .setlist-view-item .builder-item-duration { grid-column: 2; justify-self: start; }
+  .builder-item:not(.setlist-view-item) .builder-item-controls {
+    grid-column: 4;
+    justify-self: end;
+    margin-left: 6px;
+  }
+}
