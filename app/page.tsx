@@ -664,13 +664,14 @@ export default function Home() {
   const closePiece = () => { setActivePieceId(null); writeAppHash(piecesHash(search, genre, onlyOpen, pieceSort), true); };
   const openSetlist = (setlistId: number | string) => { setView("setlists"); setActiveSetlistId(setlistId); setActivePieceId(null); setBuilderId(null); writeAppHash(`setlists/${encodeURIComponent(String(setlistId))}`); };
   const closeSetlist = () => { setActiveSetlistId(null); writeAppHash(setlistsHash(setlistFilter), true); };
+  const showBuilder = (setlistId: number | string) => { setView("setlists"); setSetlistSaveState("saved"); setBuilderId(setlistId); setActivePieceId(null); setActiveSetlistId(null); writeAppHash(`setlists/${encodeURIComponent(String(setlistId))}/bearbeiten`); };
   const openBuilder = (setlistId: number | string) => {
     const requested = setlists.find((setlist) => setlist.id === setlistId);
     if (!requested || requested.state !== "draft" || (session && requested.ownerId !== session.user.id)) {
       if (requested && requested.state !== "draft") openSetlist(setlistId); else flash("Diese private Setlist ist nicht verfügbar");
       return;
     }
-    setView("setlists"); setSetlistSaveState("saved"); setBuilderId(setlistId); setActivePieceId(null); setActiveSetlistId(null); writeAppHash(`setlists/${encodeURIComponent(String(setlistId))}/bearbeiten`);
+    showBuilder(setlistId);
   };
   const closeBuilder = () => { setBuilderId(null); writeAppHash(setlistsHash(setlistFilter), true); };
   const incompletePieceCount = catalogue.filter((piece) => getMissingPieceFields(piece).length > 0).length;
@@ -812,12 +813,12 @@ export default function Home() {
       const { data, error } = await supabase.from("setlists").insert({ project_id: ACTIVE_PROJECT_ID, owner_id: session.user.id, name, state: "draft" }).select("id").single();
       if (error || !data) { flash("Entwurf konnte nicht angelegt werden"); return; }
       const setlist: Setlist = { id: data.id, name, ownerId: session.user.id, owner: friendlyName, pieceIds: [], state: "draft", rating: 0, ratingCount: 0, comments: 0, reviews: [] };
-      setSetlists((current) => [...current, setlist]); openBuilder(data.id); return;
+      setSetlists((current) => [...current, setlist]); showBuilder(data.id); return;
     }
     const numericIds = setlists.map((item) => item.id).filter((id): id is number => typeof id === "number");
     const nextId = Math.max(...numericIds, 0) + 1;
     const setlist: Setlist = { id: nextId, name, ownerId: null, owner: friendlyName, pieceIds: [], state: "draft", rating: 0, ratingCount: 0, comments: 0, reviews: [] };
-    setSetlists((current) => [...current, setlist]); openBuilder(nextId);
+    setSetlists((current) => [...current, setlist]); showBuilder(nextId);
   };
   const duplicateSetlist = async (source: Setlist) => {
     const baseName = source.name.split(" – Variante")[0];
@@ -831,12 +832,12 @@ export default function Home() {
       const items = source.pieceIds.flatMap((pieceId, index) => remotePieceIds[pieceId] ? [{ setlist_id: data.id, piece_id: remotePieceIds[pieceId], position: index + 1 }] : []);
       if (items.length) await supabase.from("setlist_items").insert(items);
       const duplicate: Setlist = { ...source, id: data.id, name, ownerId: session.user.id, owner: friendlyName, state: "draft", rating: 0, ratingCount: 0, comments: 0, reviews: [], pieceIds: [...source.pieceIds] };
-      setSetlists((current) => [...current, duplicate]); openBuilder(data.id); flash("Variante als Entwurf angelegt"); return;
+      setSetlists((current) => [...current, duplicate]); showBuilder(data.id); flash("Variante als Entwurf angelegt"); return;
     }
     const numericIds = setlists.map((item) => item.id).filter((id): id is number => typeof id === "number");
     const nextId = Math.max(...numericIds, 0) + 1;
     const duplicate: Setlist = { ...source, id: nextId, name, ownerId: null, owner: friendlyName, state: "draft", rating: 0, ratingCount: 0, comments: 0, reviews: [], pieceIds: [...source.pieceIds] };
-    setSetlists((current) => [...current, duplicate]); openBuilder(nextId); flash("Variante als Entwurf angelegt");
+    setSetlists((current) => [...current, duplicate]); showBuilder(nextId); flash("Variante als Entwurf angelegt");
   };
   const deleteSetlist = async (setlist: Setlist) => {
     const canDelete = !supabase || Boolean(session && (setlist.ownerId === session.user.id || isAdmin));
@@ -1103,7 +1104,7 @@ export default function Home() {
         <div className="page-heading"><div><span className="eyebrow"><Headphones /> Stücke bewerten</span><h1>Deine Ohren, deine Meinung.</h1><p>Bewerte erst selbst – danach siehst du, was die anderen denken.</p></div><div className="compact-progress"><strong>{completed}/{catalogue.length}</strong><div><span style={{ width: `${progress}%` }} /></div><small>bearbeitet</small></div></div>
         <div className="filter-bar"><div className="search-field" role="search"><Search /><input aria-label="Titel oder Arrangeur suchen" value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Titel oder Arrangeur suchen" />{search && <button className="clear-search-button" onClick={() => setSearch("")} aria-label="Suchtext löschen"><X /></button>}</div><label className="select-field"><Filter /><select aria-label="Genre filtern" value={genre} onChange={(event) => setGenre(event.target.value)}>{genres.map((item) => <option key={item}>{item}</option>)}</select><ChevronDown /></label><label className="select-field sort-field"><BarChart3 /><select aria-label="Stücke sortieren" value={pieceSort} onChange={(event) => setPieceSort(event.target.value as PieceSort)}><option value="title">Titel A–Z</option><option value="own-desc">Meine Bewertung</option><option value="group-desc">Gruppenbewertung</option></select><ChevronDown /></label><button className={onlyOpen ? "toggle active" : "toggle"} aria-pressed={onlyOpen} onClick={() => setOnlyOpen((current) => !current)}><span /> Nur offene</button>{hasActivePieceFilters && <button className="clear-filters" onClick={clearPieceFilters}><X /> Filter löschen</button>}</div>
         <div className="piece-list-head"><span>{filteredPieces.length} Stücke</span><span>{pieceSort === "title" ? "Titel A–Z" : pieceSort === "own-desc" ? "Meine Bewertung · höchste zuerst" : "Gruppenbewertung · höchste zuerst"}</span></div>
-        <div className="piece-list">{filteredPieces.map((piece) => { const own = ratings[piece.id]; const group = groupRatings[piece.id]; return <article className={`piece-row ${own ? "rated" : ""}`} key={piece.id}><button className="piece-play" onClick={() => openPiece(piece.id)} disabled={!piece.youtubeId} aria-label={`Hörprobe ${piece.title}`}><Play fill="currentColor" /></button><button className="piece-main" onClick={() => openPiece(piece.id)}><div className="piece-title-line"><h3>{piece.title}</h3>{own && <span className="rated-pill"><Check /> {own.skipped ? "Bearbeitet" : "Bewertet"}</span>}{piece.owned && <span className="owned-pill"><BadgeCheck /> Im Bestand</span>}</div><p>{piece.composer}</p><div className="piece-facts"><span><Clock3 /> {formatDuration(piece.durationSeconds)}</span><span>Grade {piece.grade}</span><span><Euro /> {formatPiecePrice(piece)}</span><span className="genre-chip">{piece.genres[0] ?? "Genre offen"}</span>{piece.soloStatus === "available" && <span className="solo-chip"><UserRound /> Solo</span>}{piece.soloStatus === "unknown" && <span className="solo-chip unknown"><CircleHelp /> Soli?</span>}</div></button><div className="rating-cell">{own ? <>{own.skipped ? <span className="skipped-rating"><CircleHelp /> Nicht beurteilt</span> : <Stars value={own.stars} small />}<span className="average-note">{group?.count ? `Ø Gruppe ${group.average.toFixed(1).replace(".", ",")}` : "Noch keine Gruppenwertung"}</span></> : <><span className="locked-rating"><Lock /> Gruppe noch verborgen</span><button onClick={() => openPiece(piece.id)}>Bewerten</button></>}</div><button className="piece-add-to-setlist" onClick={() => setAddPieceToSetlistId(piece.id)} title="Zu einer Setlist hinzufügen" aria-label={`${piece.title} zu einer Setlist hinzufügen`}><ListPlus /></button><ChevronRight className="row-chevron" /></article>; })}</div>
+        <div className="piece-list">{filteredPieces.map((piece) => { const own = ratings[piece.id]; const group = groupRatings[piece.id]; return <article className={`piece-row ${own ? "rated" : ""}`} key={piece.id}><button className="piece-play" onClick={() => openPiece(piece.id)} disabled={!piece.youtubeId} aria-label={`Hörprobe ${piece.title}`}><Play fill="currentColor" /></button><button className="piece-main" onClick={() => openPiece(piece.id)}><div className="piece-title-line"><h3>{piece.title}</h3>{own && <span className="rated-pill"><Check /> {own.skipped ? "Bearbeitet" : "Bewertet"}</span>}{piece.owned && <span className="owned-pill"><BadgeCheck /> Im Bestand</span>}</div><p>{piece.composer}</p><div className="piece-facts"><span><Clock3 /> {formatDuration(piece.durationSeconds)}</span><span>Grade {piece.grade}</span><span><Euro /> {formatPiecePrice(piece)}</span><span className="genre-chip">{piece.genres[0] ?? "Genre offen"}</span>{piece.soloStatus === "available" && <span className="solo-chip"><UserRound /> Solo</span>}{piece.soloStatus === "unknown" && <span className="solo-chip unknown"><CircleHelp /> Soli?</span>}</div></button><div className="rating-cell">{own ? <>{own.skipped ? <span className="skipped-rating"><CircleHelp /> Nicht beurteilt</span> : <Stars value={own.stars} small />}<span className="average-note">{group?.count ? `Ø Gruppe ${group.average.toFixed(1).replace(".", ",")}` : "Noch keine Gruppenwertung"}</span><PieceCommentsToggle rating={own} groupRating={group} /></> : <><span className="locked-rating"><Lock /> Gruppe noch verborgen</span><button onClick={() => openPiece(piece.id)}>Bewerten</button></>}</div><ChevronRight className="row-chevron" /></article>; })}</div>
       </div>}
 
       {view === "setlists" && <div className="page setlists-page">
@@ -1145,7 +1146,7 @@ export default function Home() {
     </section>
 
     <nav className="bottom-nav" aria-label="Mobile Navigation">{navItems.map((item) => { const Icon = item.icon; const count = item.id === "pieces" ? openPieceCount : item.id === "setlists" ? unratedSetlistCount : 0; return <button key={item.id} className={view === item.id ? "active" : ""} onClick={() => navigateToView(item.id)}><Icon /><span>{item.label}</span>{count > 0 && <i>{count}</i>}</button>; })}</nav>
-    {activePiece && <PieceDialog piece={activePiece} rating={ratings[activePiece.id]} groupRating={groupRatings[activePiece.id]} onClose={closePiece} onReset={() => resetPieceRating(activePiece.id)} onSave={(rating) => saveRating(activePiece.id, rating)} />}
+    {activePiece && <PieceDialog piece={activePiece} rating={ratings[activePiece.id]} groupRating={groupRatings[activePiece.id]} onAddToSetlist={() => setAddPieceToSetlistId(activePiece.id)} onClose={closePiece} onReset={() => resetPieceRating(activePiece.id)} onSave={(rating) => saveRating(activePiece.id, rating)} />}
     {activeSetlist && <SetlistDialog catalogue={catalogue} setlist={activeSetlist} rating={setlistRatings[String(activeSetlist.id)]} pieceRatings={ratings} groupRatings={groupRatings} currentUserId={session?.user.id ?? "demo-current"} canDelete={!supabase || activeSetlist.ownerId === session?.user.id || isAdmin} onClose={closeSetlist} onDelete={() => void deleteSetlist(activeSetlist)} onDuplicate={() => void duplicateSetlist(activeSetlist)} onReset={() => resetSetlistRating(activeSetlist)} onSave={(rating) => { void saveSetlistRating(activeSetlist, rating); closeSetlist(); }} />}
     {builder && builder.state === "draft" && (!session || builder.ownerId === session.user.id) && <BuilderDialog catalogue={catalogue} setlist={builder} pieceRatings={ratings} groupRatings={groupRatings} saveState={setlistSaveState} onRetry={() => void flushSetlistSaves()} onClose={closeBuilder} onDelete={() => void deleteSetlist(builder)} onDuplicate={() => void duplicateSetlist(builder)} onRandomizeName={() => patchBuilder({ name: uniqueSetlistName(setlists.filter((item) => item.id !== builder.id).map((item) => item.name)) })} onPatch={patchBuilder} onPublish={() => { patchBuilder({ state: "published" }); closeBuilder(); flash("Setlist veröffentlicht – jetzt darf bewertet werden"); }} />}
     {addPieceToSetlistId !== null && <AddPieceToSetlistDialog piece={catalogue.find((item) => item.id === addPieceToSetlistId) ?? null} drafts={setlists.filter((item) => item.state === "draft" && (!session || item.ownerId === session.user.id))} onClose={() => setAddPieceToSetlistId(null)} onAdd={(draft) => addPieceToDraft(addPieceToSetlistId, draft)} onOpenSetlists={() => { setAddPieceToSetlistId(null); navigateToView("setlists"); }} />}
@@ -1244,11 +1245,24 @@ function ProfileNameDialog({ initialName, required, email, onClose, onSave, onCh
   return <div className="dialog-backdrop profile-backdrop" onMouseDown={(event) => !required && event.target === event.currentTarget && onClose()}><section className="dialog profile-dialog" role="dialog" aria-modal="true" aria-label={required ? "Profil vervollständigen" : "Profil bearbeiten"}>{!required && <button className="dialog-close" onClick={onClose} aria-label="Schließen"><X /></button>}<div className="profile-icon"><UserRound /></div><span className="dialog-kicker"><Sparkles /> {required ? "Fast geschafft" : "Dein Profil"}</span><h2>{required ? "Wie dürfen wir dich nennen?" : "Name und Passwort"}</h2><p className="profile-intro">Dieser Name erscheint bei deinen Bewertungen, Kommentaren und Setlists. Ein Vorname reicht vollkommen.</p><form className="profile-form" onSubmit={(event) => { event.preventDefault(); void save(); }}><label><span>Anzeigename</span><input autoFocus autoComplete="name" maxLength={80} required value={name} onChange={(event) => setName(event.target.value)} placeholder="Zum Beispiel Fabian" /></label><small className="profile-email">Angemeldet als {email}</small>{error && <div className="profile-error"><CircleHelp /> {error}</div>}<div className="dialog-actions profile-name-actions">{!required && <button type="button" className="text-button" onClick={onClose}>Abbrechen</button>}<button className="primary-button" disabled={busy || normalizedName.length < 2}>{busy ? "Wird gespeichert …" : "Name speichern"}<Check /></button></div></form><div className="profile-password"><h3>Passwort festlegen oder ändern</h3><p>Damit kannst du dich ohne Anmeldemail einloggen.</p><label><span>Neues Passwort</span><input autoComplete="new-password" type="password" minLength={8} value={password} onChange={(event) => setPassword(event.target.value)} placeholder="Mindestens 8 Zeichen" /></label><label><span>Passwort wiederholen</span><input autoComplete="new-password" type="password" minLength={8} value={passwordRepeat} onChange={(event) => setPasswordRepeat(event.target.value)} placeholder="Noch einmal eingeben" /></label>{passwordMessage && <div className={passwordMessage.startsWith("Passwort gespeichert") ? "profile-success" : "profile-error"}>{passwordMessage.startsWith("Passwort gespeichert") ? <Check /> : <CircleHelp />} {passwordMessage}</div>}<button type="button" className="secondary-button" disabled={passwordBusy || !password || !passwordRepeat} onClick={() => void changePassword()}>{passwordBusy ? "Wird gespeichert …" : "Passwort speichern"}</button></div></section></div>;
 }
 
-function PieceDialog({ piece, rating, groupRating, onClose, onReset, onSave }: { piece: Piece; rating?: Rating; groupRating?: GroupRating; onClose: () => void; onReset: () => Promise<boolean>; onSave: (rating: Rating) => Promise<boolean> }) {
+function PieceDialog({ piece, rating, groupRating, onAddToSetlist, onClose, onReset, onSave }: { piece: Piece; rating?: Rating; groupRating?: GroupRating; onAddToSetlist: () => void; onClose: () => void; onReset: () => Promise<boolean>; onSave: (rating: Rating) => Promise<boolean> }) {
   const [stars, setStars] = useState<number | null>(rating?.stars ?? null);
   const [skipped, setSkipped] = useState(rating?.skipped ?? false);
   const [comment, setComment] = useState(rating?.comment ?? "");
   const [saving, setSaving] = useState(false);
+  const addActionRef = useRef<HTMLButtonElement | null>(null);
+  useEffect(() => {
+    const actionRow = document.querySelector(".piece-dialog .dialog-subtitle-row");
+    if (!actionRow) return;
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "dialog-link-button piece-dialog-add-button";
+    button.textContent = "+ Zu Setlist";
+    button.addEventListener("click", onAddToSetlist);
+    actionRow.appendChild(button);
+    addActionRef.current = button;
+    return () => { button.removeEventListener("click", onAddToSetlist); button.remove(); addActionRef.current = null; };
+  }, [onAddToSetlist]);
   const submit = async () => {
     if (!stars && !skipped) return;
     setSaving(true);

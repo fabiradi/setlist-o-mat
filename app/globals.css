@@ -570,6 +570,35 @@ small {
   }
 }
 
+/* Kompakte, inhaltssensitive Listen und klarere Setlist-Bearbeitung */
+.setlist-grid { align-items: start; }
+.setlist-card { align-self: start; }
+.piece-row { grid-template-columns: auto minmax(0,1fr) 205px auto; }
+.rating-cell .piece-comments-toggle { margin-top: 2px; }
+.piece-dialog-add-button { order: 1; margin-left: auto; }
+.dialog-subtitle-row > a { order: 2; }
+.builder-title-row { position: relative; padding-top: 17px; }
+.builder-title-row:before { content: "Setlist-Name · frei bearbeitbar"; position: absolute; left: 32px; top: 0; color: var(--muted); font-size: 9px; font-weight: 750; letter-spacing: .02em; }
+.builder-title-row input { border-radius: 8px; padding: 3px 6px; margin-left: -6px; }
+.builder-title-row input:hover { background: #f5f1ff; box-shadow: inset 0 0 0 1px #d8cef5; }
+.builder-title-row input:focus { background: #fff; box-shadow: inset 0 0 0 2px var(--purple); }
+.builder-rating-line { display: contents; }
+.builder-item-actions > .builder-rating-line > .piece-rating-badges { grid-column: 1/-1; grid-row: 1; }
+.builder-item-actions > .builder-rating-line > .piece-comments-toggle { grid-column: 1; grid-row: 2; justify-self: end; align-self: center; }
+.setlist-view-item .builder-item-actions { grid-template-columns: minmax(0,1fr) auto; }
+.setlist-view-item .builder-item-duration { grid-column: 2; grid-row: 2; margin-top: 0; }
+
+@media (max-width: 1100px) and (min-width: 761px) {
+  .piece-row { grid-template-columns: auto minmax(0,1fr) 165px auto; }
+}
+
+@media (max-width: 760px) {
+  .piece-row { grid-template-columns: auto minmax(0,1fr) auto; }
+  .rating-cell { grid-column: 2/-1; }
+  .piece-dialog-add-button { margin-left: 0; }
+  .builder-title-row:before { left: 32px; }
+}
+
 .solo-chip.none { background: #ece9e5; color: #6f6875 !important; }
 .setlist-preview-solo.unknown { color: #866100; background: var(--yellow-soft); }
 .candidate-list .candidate-solo.unknown { color: #866100; }
@@ -779,4 +808,23 @@ small {
   .setlist-dialog:not(.setlist-view-dialog) .builder-main,
   .setlist-dialog:not(.setlist-view-dialog) .builder-summary { overflow: visible; padding: 0; }
   .setlist-dialog:not(.setlist-view-dialog) .builder-summary { margin-top: 8mm; border: 0; background: transparent; break-inside: avoid; }
+}
+
+/* Finale Layout-Overrides für die Stück- und Setlistlisten */
+.setlist-grid { align-items: start; }
+.setlist-card { align-self: start; }
+.piece-row { grid-template-columns: auto minmax(0,1fr) 205px auto; }
+.builder-rating-line { display: contents; }
+.builder-item-actions > .builder-rating-line > .piece-rating-badges { grid-column: 1/-1; grid-row: 1; }
+.builder-item-actions > .builder-rating-line > .piece-comments-toggle { grid-column: 1; grid-row: 2; justify-self: end; align-self: center; }
+.setlist-view-item .builder-item-actions { grid-template-columns: minmax(0,1fr) auto; }
+.setlist-view-item .builder-item-duration { grid-column: 2; grid-row: 2; margin-top: 0; }
+
+@media (max-width: 1100px) and (min-width: 761px) {
+  .piece-row { grid-template-columns: auto minmax(0,1fr) 165px auto; }
+}
+
+@media (max-width: 760px) {
+  .piece-row { grid-template-columns: auto minmax(0,1fr) auto; }
+  .rating-cell { grid-column: 2/-1; }
 }
