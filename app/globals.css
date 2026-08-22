@@ -688,4 +688,27 @@ small {
   .setlist-view-dialog .builder-item { break-inside: avoid; }
 }
 
+/* Gruppenmeinung im Stückdialog: Zusammenfassung und klar getrennte Kommentare */
+.piece-dialog .group-peek { display: block; padding: 0; overflow: hidden; border: 1px solid #d8cef5; background: #f5f1ff; }
+.piece-dialog .group-peek-summary { min-height: 50px; padding: 11px 13px; display: flex; align-items: center; gap: 8px; color: var(--purple); }
+.piece-dialog .group-peek-summary > div { display: inline-flex; align-items: center; gap: 6px; margin-right: auto; color: var(--purple); font-weight: 800; }
+.piece-dialog .group-peek-summary > div svg { width: 16px; height: 16px; }
+.piece-dialog .group-peek-summary > strong { font-size: 14px; }
+.group-piece-comments { display: grid !important; gap: 8px; border-top: 1px solid #d8cef5; padding: 12px; color: var(--ink) !important; background: rgba(255,255,255,.42); }
+.group-piece-comments h3 { display: flex; align-items: center; gap: 7px; margin: 0 0 2px; font-size: 13px; }
+.group-piece-comments h3 span { min-width: 20px; height: 20px; border-radius: 99px; display: grid; place-items: center; background: var(--purple-soft); color: var(--purple); font-size: 10px; }
+.group-piece-comments article { border: 1px solid #e2dce9; border-left: 3px solid #b6a3eb; border-radius: 10px; padding: 10px 11px; background: #fff; box-shadow: 0 2px 7px rgba(33,25,47,.04); }
+.group-piece-comments article + article { margin-top: 0; }
+.group-piece-comments article header { display: flex; align-items: center; }
+.group-comment-user { display: inline-flex; align-items: center; gap: 6px; color: var(--purple); }
+.group-comment-user svg { width: 15px; height: 15px; }
+.group-comment-user strong { color: var(--ink); font-size: 12px; }
+.group-piece-comments article p { margin: 7px 0 0; color: var(--muted); font-size: 12px; line-height: 1.5; white-space: pre-wrap; }
+
+@media (max-width: 760px) {
+  .piece-dialog .group-peek-summary { align-items: flex-start; flex-wrap: wrap; }
+  .piece-dialog .group-peek-summary > div { flex: 1 0 100%; }
+  .group-piece-comments { padding: 10px; }
+}
+
 @media (prefers-reduced-motion: reduce) { *, *:before, *:after { scroll-behavior: auto !important; animation: none !important; transition: none !important; } }
