@@ -1190,13 +1190,6 @@ function SetlistPlayer({ pieces, compact = false, activePieceId, onActivePieceCh
     onActivePieceChange(pieceId);
   };
 
-  const selectPiece = (pieceId: number) => {
-    const index = playable.findIndex((piece) => piece.id === pieceId);
-    if (index < 0) return;
-    reportActivePiece(pieceId, true);
-    playerRef.current?.cuePlaylist(playable.map((piece) => piece.youtubeId), index, 0);
-  };
-
   useEffect(() => {
     activePieceIdRef.current = activePieceId;
     if (skipNextPropCueRef.current) {
@@ -1268,6 +1261,8 @@ function SetlistDialog({ catalogue, setlist, rating, pieceRatings, groupRatings,
   const metrics = getMetrics(setlist.pieceIds, catalogue);
   const comments = setlist.reviews.filter((review) => review.comment);
   const isDraft = setlist.state === "draft";
+  const soloCount = metrics.selected.filter((piece) => piece.soloStatus === "available").length;
+  const statusLabel = isDraft ? "Entwurf · schreibgeschützt" : setlist.state === "final" ? "Finale Setlist" : setlist.state === "finalist" ? "Finalist" : "Veröffentlicht";
   const reset = async () => {
     if (!window.confirm("Deine Setlist-Bewertung und dein Kommentar werden gelöscht. Möchtest du wirklich zurücksetzen?")) return;
     setResetting(true);
@@ -1275,25 +1270,66 @@ function SetlistDialog({ catalogue, setlist, rating, pieceRatings, groupRatings,
     setResetting(false);
     if (resetDone) onClose();
   };
-  return <div className="dialog-backdrop" onMouseDown={(event) => event.target === event.currentTarget && onClose()}>
-    <section className={`dialog setlist-dialog ${isDraft ? "draft-preview" : ""}`} role="dialog" aria-modal="true" aria-label={`${setlist.name} ${isDraft ? "ansehen" : "bewerten"}`}>
-      <button className="dialog-close" onClick={onClose}><X /></button>
-      <span className="dialog-kicker"><ListMusic /> {isDraft ? "Setlist-Vorschau" : "Setlist bewerten"}</span>
-      <h2 className="setlist-dialog-title"><ListMusic aria-hidden="true" />{setlist.name}</h2>
-      <div className="dialog-subtitle-row">
-        <p className="dialog-subtitle">von {setlist.owner} · {setlist.pieceIds.length} Stücke</p>
-        <div className="dialog-link-actions">
-          <button className="dialog-link-button" onClick={onCopyLink}><Copy /> Link kopieren</button>
-          <button className="dialog-link-button" onClick={() => printSetlistDocument(setlist.name)}><Printer /> Drucken / PDF</button>
+  return <div className="dialog-backdrop builder-backdrop" onMouseDown={(event) => event.target === event.currentTarget && onClose()}>
+    <section className={`dialog builder-dialog setlist-dialog setlist-view-dialog ${isDraft ? "draft-preview" : ""}`} role="dialog" aria-modal="true" aria-label={`${setlist.name} ${isDraft ? "ansehen" : "bewerten"}`}>
+      <header className="builder-header">
+        <div>
+          <span className={`builder-draft-status setlist-state-${setlist.state}`}>{isDraft ? <Lock /> : setlist.state === "final" || setlist.state === "finalist" ? <Trophy /> : <ListMusic />}{statusLabel}</span>
+          <div className="builder-title-row setlist-view-title"><ListMusic aria-hidden="true" /><h2>{setlist.name}</h2></div>
+          <div className="builder-header-meta">
+            <span className="builder-piece-count">{setlist.pieceIds.length} Stücke</span>
+            <span className="setlist-owner">von {setlist.owner}</span>
+            <div className="dialog-link-actions">
+              <button className="dialog-link-button" onClick={onCopyLink}><Copy /> Link kopieren</button>
+              <button className="dialog-link-button" onClick={() => printSetlistDocument(setlist.name)}><Printer /> Drucken / PDF</button>
+            </div>
+          </div>
         </div>
+        <button className="dialog-close" onClick={onClose}><X /></button>
+      </header>
+      <div className="builder-layout">
+        <div className="builder-main">
+          {metrics.selected.length > 0 && <SetlistPlayer pieces={metrics.selected} compact activePieceId={activePreviewPieceId} onActivePieceChange={setActivePreviewPieceId} />}
+          <div className="builder-items setlist-view-items">
+            {metrics.selected.map((piece, index) => <div className={`builder-item setlist-view-item ${activePreviewPieceId === piece.id ? "active-preview" : ""}`} key={piece.id} onClick={() => piece.youtubeId && setActivePreviewPieceId(piece.id)}>
+              <div className="builder-order-column"><span className="order-number">{index + 1}</span>{activePreviewPieceId === piece.id && <Play className="builder-playing" fill="currentColor" />}</div>
+              <div className="builder-item-copy"><strong className="builder-piece-title">{piece.title}<span title={`Schwierigkeit: Grade ${piece.grade}`}><BarChart3 /> {piece.grade}</span>{piece.genres[0] && <em className="builder-genre">{piece.genres[0]}</em>}</strong><span>{piece.composer}</span><div>{piece.soloStatus === "available" && <em className="builder-solo"><UserRound /> {piece.solos ? `Solo · ${piece.solos}` : "Solo vorhanden"}</em>}{piece.soloStatus === "unknown" && <em className="builder-solo unknown"><CircleHelp /> Soli ungeprüft</em>}</div></div>
+              <div className="builder-item-actions"><PieceRatingBadges rating={pieceRatings[piece.id]} groupRating={groupRatings[piece.id]} /><span className="builder-item-duration"><Clock3 /> {formatDuration(piece.durationSeconds)}</span></div>
+            </div>)}
+          </div>
+          {!isDraft && <>
+            <section className="setlist-rating-summary" aria-label="Gruppenbewertung der Setlist">
+              <div><Users /><span>Gruppenurteil</span></div>
+              <DisplayStars value={setlist.ratingCount ? setlist.rating : 0} />
+              <strong>{setlist.ratingCount ? setlist.rating.toFixed(1).replace(".", ",") : "–"}</strong>
+              <small>({setlist.ratingCount})</small>
+            </section>
+            <section className="rating-panel setlist-own-rating">
+              <h3>Diese Setlist bewerten</h3>
+              <div className="rating-question"><span>Wie gut funktioniert diese Reihenfolge?</span><Stars value={stars} onChange={setStars} /></div>
+              <label><span>Dein Kommentar <small>optional und später änderbar</small></span><textarea value={comment} onChange={(event) => setComment(event.target.value)} placeholder="Dramaturgie, Dauer, Genre-Mix, Soli …" /></label>
+            </section>
+            <section className="setlist-comments" aria-label="Kommentare">
+              <h3>Kommentare <span>{comments.length}</span></h3>
+              {comments.length ? <div className="discussion-comments">{comments.map((review) => <article key={review.userId}><header><strong>{review.userId === currentUserId ? "Du" : review.author}</strong><span><Star fill="currentColor" /> {review.stars}/5</span></header><p>{review.comment}</p></article>)}</div> : <p className="discussion-empty">Noch keine Kommentare – du kannst die Diskussion eröffnen.</p>}
+            </section>
+          </>}
+          <div className="dialog-actions setlist-view-actions">
+            <div className="dialog-danger-actions">{canDelete && <button className="dialog-danger-button" disabled={resetting} onClick={onDelete}><Trash2 /> Setlist löschen</button>}{rating && !isDraft && <button className="dialog-danger-button" disabled={resetting} onClick={() => void reset()}><X /> {resetting ? "Wird zurückgesetzt …" : "Bewertung zurücksetzen"}</button>}</div>
+            <button className="text-button" disabled={resetting} onClick={onClose}>{isDraft ? "Schließen" : "Abbrechen"}</button>
+            {!isDraft && <button className="primary-button" disabled={resetting || !stars} onClick={() => stars && onSave({ stars, comment })}><Check /> Bewertung speichern</button>}
+          </div>
+        </div>
+        <aside className="builder-summary">
+          <span className="eyebrow">Live-Check</span><h3>Passt das Programm?</h3>
+          <TimeSignal duration={metrics.duration} />
+          <div className="summary-stat"><span><Clock3 /> Dauer</span><strong>{formatDuration(metrics.duration)}</strong></div>
+          <div className="summary-stat"><span><BarChart3 /> Schwierigkeit</span><strong>{metrics.minGrade || "–"}–{metrics.maxGrade || "–"}</strong><small>Ø {metrics.avgGrade ? metrics.avgGrade.toFixed(1).replace(".", ",") : "–"}</small></div>
+          <div className="summary-stat"><span><UserRound /> Solo-Stücke</span><strong>{soloCount}</strong></div>
+          <div className="summary-stat"><span><Euro /> Noch zu kaufen</span><strong>{formatMoney(metrics.cost)}</strong></div>
+          <div className="summary-genres"><span>Genre-Mix</span><div>{metrics.genres.length ? metrics.genres.map((item) => <em key={item}>{item}</em>) : <small>Keine Genres hinterlegt</small>}</div></div>
+        </aside>
       </div>
-      <TimeSignal duration={metrics.duration} />
-      <div className="setlist-dialog-metrics"><span><BarChart3 /> Grade {metrics.minGrade}–{metrics.maxGrade} · Ø {metrics.avgGrade.toFixed(1).replace(".", ",")}</span><span><Euro /> {formatMoney(metrics.cost)} zu kaufen</span></div>
-      <div className="setlist-dialog-genres">{metrics.genres.map((genre) => <span className="genre-chip" key={genre}>{genre}</span>)}</div>
-      <SetlistPlayer pieces={metrics.selected} activePieceId={activePreviewPieceId} onActivePieceChange={setActivePreviewPieceId} />
-      <ol className="setlist-dialog-pieces">{metrics.selected.map((piece, index) => <li className={activePreviewPieceId === piece.id ? "active-preview" : ""} key={piece.id} onClick={() => piece.youtubeId && setActivePreviewPieceId(piece.id)}><div className="dialog-order-column"><b className="dialog-order">{index + 1}</b>{activePreviewPieceId === piece.id && <Play className="dialog-playing" fill="currentColor" />}</div><div><strong>{piece.title}</strong><span>{piece.composer}</span><PieceRatingBadges rating={pieceRatings[piece.id]} groupRating={groupRatings[piece.id]} />{piece.soloStatus === "available" && <span className="dialog-solo"><UserRound /> {piece.solos ? `Solo · ${piece.solos}` : "Solo vorhanden"}</span>}{piece.soloStatus === "unknown" && <span className="dialog-solo unknown"><CircleHelp /> Soli ungeprüft</span>}</div><small>{formatDuration(piece.durationSeconds)}</small></li>)}</ol>
-      {!isDraft && <><section className="setlist-discussion" aria-label="Gruppenbewertung"><div className="discussion-summary"><div><Users /><span>Gruppe · {setlist.ratingCount} {setlist.ratingCount === 1 ? "Bewertung" : "Bewertungen"}</span></div><strong>{setlist.ratingCount ? `Ø ${setlist.rating.toFixed(1).replace(".", ",")}` : "Noch keine Gruppenwertung"}</strong>{setlist.ratingCount > 0 && <Stars value={Math.round(setlist.rating)} small />}</div>{comments.length ? <div className="discussion-comments">{comments.map((review) => <article key={review.userId}><header><strong>{review.userId === currentUserId ? "Du" : review.author}</strong><span><Star fill="currentColor" /> {review.stars}/5</span></header><p>{review.comment}</p></article>)}</div> : <p className="discussion-empty">Noch keine Kommentare – du kannst die Diskussion eröffnen.</p>}</section><div className="rating-panel"><div className="rating-question"><span>Wie gut funktioniert diese Reihenfolge?</span><Stars value={stars} onChange={setStars} /></div><label><span>Dein Kommentar <small>optional und später änderbar</small></span><textarea value={comment} onChange={(event) => setComment(event.target.value)} placeholder="Dramaturgie, Dauer, Genre-Mix, Soli …" /></label></div></>}
-      <div className="dialog-actions"><div className="dialog-danger-actions">{canDelete && <button className="dialog-danger-button" disabled={resetting} onClick={onDelete}><Trash2 /> Setlist löschen</button>}{rating && !isDraft && <button className="dialog-danger-button" disabled={resetting} onClick={() => void reset()}><X /> {resetting ? "Wird zurückgesetzt …" : "Bewertung zurücksetzen"}</button>}</div><button className="text-button" disabled={resetting} onClick={onClose}>{isDraft ? "Schließen" : "Abbrechen"}</button>{!isDraft && <button className="primary-button" disabled={resetting || !stars} onClick={() => stars && onSave({ stars, comment })}><Check /> Bewertung speichern</button>}</div>
     </section>
   </div>;
 }
