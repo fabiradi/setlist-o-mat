@@ -33,6 +33,9 @@ jobs:
       - name: GitHub Pages konfigurieren
         uses: actions/configure-pages@v5
 
+      - name: Deployment-Version erzeugen
+        run: printf '{"version":"%s"}\n' "$GITHUB_SHA" > public/version.json
+
       - name: App bauen
         run: npm run build:pages
         env:
@@ -40,6 +43,7 @@ jobs:
           # erfolgt in Supabase über Auth und Row Level Security, nicht über den Key.
           NEXT_PUBLIC_SUPABASE_URL: https://jiqyajrtbbwaugcvfrqg.supabase.co
           NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY: sb_publishable_od1SwIY7bEHWYo_NzWYkTw_EYlEX5yU
+          NEXT_PUBLIC_BUILD_ID: ${{ github.sha }}
 
       - name: Seiten-Artefakt hochladen
         uses: actions/upload-pages-artifact@v4

@@ -744,6 +744,13 @@ small {
 .draft-choice-list span, .draft-choice-list strong, .draft-choice-list small { display: block; }
 .draft-choice-list small { color: var(--muted); margin-top: 2px; }
 .empty-draft-choice { display: grid; justify-items: center; gap: 10px; padding: 22px; border-radius: 12px; background: var(--paper); color: var(--muted); text-align: center; }
+.update-banner { position: fixed; z-index: 115; right: 22px; bottom: 22px; width: min(430px, calc(100vw - 44px)); display: grid; grid-template-columns: auto minmax(0,1fr) auto; align-items: center; gap: 11px; padding: 12px 13px; border: 1px solid #d4c7f6; border-radius: 14px; background: #fff; box-shadow: var(--shadow); }
+.update-banner > svg { width: 20px; height: 20px; color: var(--purple); }
+.update-banner span, .update-banner strong, .update-banner small { display: block; }
+.update-banner strong { font-size: 12px; }
+.update-banner small { margin-top: 2px; color: var(--muted); font-size: 10px; line-height: 1.35; }
+.update-banner button { border: 0; border-radius: 9px; padding: 8px 10px; background: var(--purple); color: #fff; font-size: 11px; font-weight: 800; cursor: pointer; white-space: nowrap; }
+.update-banner button:hover { background: var(--purple-dark); }
 .piece-row { grid-template-columns: auto minmax(0,1fr) 205px auto auto; }
 
 @media (max-width: 1100px) and (min-width: 761px) {
@@ -756,6 +763,8 @@ small {
   .piece-add-to-setlist { grid-column: 4; grid-row: 2; align-self: center; }
   .builder-rating-line { flex-wrap: wrap; }
   .piece-comments-toggle > div { position: fixed; left: 14px; right: 14px; bottom: 82px; top: auto; width: auto; max-height: 45vh; }
+  .update-banner { left: 14px; right: 14px; bottom: calc(74px + env(safe-area-inset-bottom)); width: auto; grid-template-columns: auto minmax(0,1fr); }
+  .update-banner button { grid-column: 1/-1; width: 100%; }
 }
 
 @media print {

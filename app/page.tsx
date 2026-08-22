@@ -6,7 +6,7 @@ import {
   Activity, ArrowDown, ArrowUp, BadgeCheck, BarChart3, Check, ChevronDown,
   ChevronRight, CircleHelp, Clock3, Copy, Euro, FileMusic, Filter, KeyRound,
   Construction, ExternalLink, Headphones, ListMusic, ListPlus, Lock, LogOut, MessageCircle,
-  Music2, Pencil, Play, Plus, Power, Printer, Search, Settings, Shuffle, Sparkles,
+  Music2, Pencil, Play, Plus, Power, Printer, RefreshCw, Search, Settings, Shuffle, Sparkles,
   Star, Trash2, Trophy, UserRound, Users, X,
 } from "lucide-react";
 import rawPieces from "./data/pieces.json";
@@ -84,6 +84,7 @@ const pieces = rawPieces as Piece[];
 const TARGET_MIN = 25 * 60;
 const TARGET_MAX = 30 * 60;
 const ACTIVE_PROJECT_ID = "20270000-0000-4000-8000-000000000001";
+const BUILD_ID = process.env.NEXT_PUBLIC_BUILD_ID ?? "development";
 const emptyPiece: Piece = {
   id: 0, title: "Neues Stück", composer: "", durationSeconds: 0, grade: 0,
   priceCents: 0, owned: false, genres: [], sampleUrl: null, youtubeId: null,
@@ -165,6 +166,11 @@ function writeAppHash(hash: string, replace = false) {
     window.history.replaceState(null, "", `${window.location.pathname}${window.location.search}${nextHash}`);
     window.dispatchEvent(new HashChangeEvent("hashchange"));
   } else window.location.hash = nextHash;
+}
+function reloadForVersion(version: string) {
+  const url = new URL(window.location.href);
+  url.searchParams.set("appVersion", version);
+  window.location.replace(url.toString());
 }
 function piecesHash(search: string, genre: string, onlyOpen: boolean, sort: PieceSort = "title") {
   const params = new URLSearchParams();
@@ -283,6 +289,39 @@ export default function Home() {
   const [maintenanceReady, setMaintenanceReady] = useState(!supabase);
   const [projectDataReady, setProjectDataReady] = useState(!supabase);
   const [addPieceToSetlistId, setAddPieceToSetlistId] = useState<number | null>(null);
+  const [availableVersion, setAvailableVersion] = useState<string | null>(null);
+  const hiddenAt = useRef<number | null>(null);
+  const interactionBlocked = activePieceId !== null || activeSetlistId !== null || builderId !== null || adminEditId !== null || adminCreatingPiece || showProfileDialog || temporaryPassword !== null || addPieceToSetlistId !== null || setlistSaveState === "saving";
+
+  useEffect(() => {
+    let active = true;
+    const checkVersion = async (autoReload: boolean) => {
+      try {
+        const versionUrl = new URL("version.json", document.baseURI);
+        versionUrl.searchParams.set("t", String(Date.now()));
+        const response = await fetch(versionUrl, { cache: "no-store" });
+        if (!response.ok) return;
+        const payload = await response.json() as { version?: string };
+        const nextVersion = payload.version?.trim();
+        if (!active || !nextVersion || nextVersion === BUILD_ID || nextVersion === "development") return;
+        if (autoReload && !interactionBlocked) reloadForVersion(nextVersion);
+        else setAvailableVersion(nextVersion);
+      } catch (error) {
+        console.warn("version check failed", error);
+      }
+    };
+    const handleVisibility = () => {
+      if (document.visibilityState === "hidden") { hiddenAt.current = Date.now(); return; }
+      const wasAwayLongEnough = hiddenAt.current !== null && Date.now() - hiddenAt.current >= 5 * 60_000;
+      hiddenAt.current = null;
+      void checkVersion(wasAwayLongEnough);
+    };
+    void checkVersion(true);
+    const timer = window.setInterval(() => void checkVersion(false), 5 * 60_000);
+    document.addEventListener("visibilitychange", handleVisibility);
+    window.addEventListener("focus", handleVisibility);
+    return () => { active = false; window.clearInterval(timer); document.removeEventListener("visibilitychange", handleVisibility); window.removeEventListener("focus", handleVisibility); };
+  }, [interactionBlocked]);
 
   useEffect(() => {
     const syncFromHash = () => {
@@ -1114,6 +1153,7 @@ export default function Home() {
     {adminCreatingPiece && <AdminPieceDialog piece={emptyPiece} creating onClose={() => setAdminCreatingPiece(false)} onSave={createPiece} />}
     {showProfileDialog && supabase && session && <ProfileNameDialog initialName={suggestedProfileName} required={!profileNameConfirmedAt} email={email} onClose={() => setShowProfileDialog(false)} onSave={saveProfileName} onChangePassword={changeOwnPassword} />}
     {temporaryPassword && <TemporaryPasswordDialog result={temporaryPassword} onClose={() => setTemporaryPassword(null)} onCopied={() => flash("Temporäres Passwort kopiert")} />}
+    {availableVersion && <aside className="update-banner" role="status"><RefreshCw /><span><strong>Neue Version verfügbar</strong><small>Einmal aktualisieren, dann bist du wieder auf dem neuesten Stand.</small></span><button onClick={() => reloadForVersion(availableVersion)}>Jetzt aktualisieren</button></aside>}
     {toast && <div className="toast"><Check /> {toast}</div>}
   </main>;
 }
