@@ -658,6 +658,12 @@ small {
 .setlist-comments .discussion-comments { margin-top: 0; }
 .setlist-view-actions { position: static; }
 
+/* Im Editor stehen Dauer und Bearbeitungsbuttons platzsparend in einer Zeile. */
+.builder-item:not(.setlist-view-item) .builder-item-actions { grid-template-columns: auto auto; align-items: center; }
+.builder-item:not(.setlist-view-item) .builder-item-actions .piece-rating-badges { grid-column: 1/-1; grid-row: 1; }
+.builder-item:not(.setlist-view-item) .builder-item-duration { grid-column: 1; grid-row: 2; margin-right: 5px; }
+.builder-item:not(.setlist-view-item) .builder-item-controls { grid-column: 2; grid-row: 2; }
+
 @media (max-width: 760px) {
   .setlist-view-dialog .builder-header-meta { width: 100%; align-items: flex-start; }
   .setlist-view-dialog .dialog-link-actions { width: 100%; margin-left: 0; justify-content: flex-start; }
@@ -667,6 +673,10 @@ small {
   .setlist-rating-summary { flex-wrap: wrap; }
   .setlist-rating-summary > div { flex: 1 0 100%; }
   .setlist-own-rating, .setlist-comments { padding: 14px; }
+  .builder-item:not(.setlist-view-item) .builder-item-actions { grid-template-columns: minmax(0,1fr) auto auto; }
+  .builder-item:not(.setlist-view-item) .builder-item-actions .piece-rating-badges { grid-column: 1; grid-row: 1; }
+  .builder-item:not(.setlist-view-item) .builder-item-duration { grid-column: 2; grid-row: 1; margin-right: 0; }
+  .builder-item:not(.setlist-view-item) .builder-item-controls { grid-column: 3; grid-row: 1; }
 }
 
 @media print {
