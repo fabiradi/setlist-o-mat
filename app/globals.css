@@ -432,6 +432,16 @@ small {
   }
 }
 
+/* Das Popover der Stückliste muss samt Elternzeile über benachbarten Zeilen liegen. */
+.piece-list { isolation: isolate; }
+.piece-list .piece-row { position: relative; z-index: 0; }
+.piece-list .piece-row:hover { z-index: 1; }
+.piece-list .piece-row:has(.piece-comments-toggle[open]) {
+  z-index: 70;
+  transform: none;
+}
+.piece-list .piece-row:has(.piece-comments-toggle[open]) .rating-cell { z-index: 71; }
+
 @media print {
   @page {
     size: A4 portrait;
