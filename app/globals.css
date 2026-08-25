@@ -465,6 +465,25 @@ small {
   }
 }
 
+/* Kompakte Häufigkeit und Setlist-Bewertungen */
+.select-field select { flex: 1 1 auto; width: 100%; min-width: 0; align-self: stretch; cursor: pointer; }
+.select-field > svg:last-child { pointer-events: none; flex: 0 0 auto; }
+.setlist-piece-preview > span { grid-template-columns: 21px minmax(0, 1fr) auto auto; }
+.setlist-piece-preview .hotness-indicator { grid-column: 3; margin: 0; }
+.setlist-piece-preview .hotness-indicator + small { grid-column: 4; }
+.hotness-indicator { border-radius: 999px; padding: 3px 7px; color: #fff; background: #7b8188; line-height: 1; }
+.hotness-indicator.warm { color: #70400d; background: var(--yellow-soft); }
+.hotness-indicator.hot { color: #fff; background: var(--coral); }
+.hotness-indicator svg { width: 12px; height: 12px; }
+.setlist-rating-row.group .display-stars { color: var(--purple) !important; }
+.setlist-rating-row.own { opacity: 1; }
+.setlist-rating-row.own .display-stars { color: var(--yellow) !important; }
+.setlist-rating-row.own strong { font-size: 14px; }
+
+@media (max-width: 700px) {
+  .setlist-piece-preview > span { grid-template-columns: 21px minmax(0, 1fr) auto auto; }
+}
+
 /* Das Popover der Stückliste muss samt Elternzeile über benachbarten Zeilen liegen. */
 .piece-list { isolation: isolate; }
 .piece-list .piece-row { position: relative; z-index: 0; }

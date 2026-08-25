@@ -3102,7 +3102,7 @@ export default function Home() {
                     setSetlistSort("rating-desc");
                 }}
               >
-                {showConsensus ? <Eye /> : <EyeOff />} Konsenshinweise
+                {showConsensus ? <Eye /> : <EyeOff />} Häufigkeit
               </button>
             </div>
             {visibleSetlists.length ? (
@@ -3248,7 +3248,7 @@ export default function Home() {
                                   <DisplayStars
                                     value={ownSetlistRating.stars}
                                   />
-                                  <small>deine Bewertung</small>
+                                  <strong>{ownSetlistRating.stars}</strong>
                                 </>
                               ) : (
                                 <small>noch nicht bewertet</small>
@@ -4736,6 +4736,7 @@ function HotnessIndicator({
   total: number;
   compact?: boolean;
 }) {
+  if (count < 2) return null;
   const ratio = total ? count / total : 0;
   const level = ratio >= 0.5 ? "hot" : ratio >= 0.25 ? "warm" : "cool";
   return (
