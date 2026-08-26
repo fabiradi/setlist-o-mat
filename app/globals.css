@@ -999,12 +999,12 @@ small {
 .hotness-indicator.hot {
   padding: 0;
   border-radius: 0;
-  color: #b65038;
+  color: #9a6100;
   background: transparent;
 }
 .hotness-indicator svg { color: currentColor; }
-.setlist-piece-preview > span.frequency-heat {
-  padding-inline: 6px;
+.setlist-piece-preview > span {
+  padding: 5px 6px;
   border-radius: 7px;
 }
 .builder-item.active-preview { background: var(--coral-soft) !important; }

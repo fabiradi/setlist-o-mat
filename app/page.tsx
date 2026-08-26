@@ -4751,9 +4751,9 @@ function getFrequencyStyle(
   total: number,
 ): CSSProperties | undefined {
   if (count < 2 || total < 1) return undefined;
-  const ratio = count / total;
-  const alpha = Math.min(0.18, 0.025 + ratio * 0.155);
-  return { backgroundColor: `rgba(240, 100, 73, ${alpha.toFixed(3)})` };
+  const intensity = Math.min(1, count / 10);
+  const alpha = 0.04 + intensity * 0.4;
+  return { backgroundColor: `rgba(243, 185, 49, ${alpha.toFixed(3)})` };
 }
 
 function HotnessIndicator({
