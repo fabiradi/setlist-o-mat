@@ -108,6 +108,26 @@ type Member = {
   ratingsCompleted: number;
 };
 type AllowedEmail = { email: string; displayName: string | null };
+type Project = {
+  id: string;
+  name: string;
+  status: "active" | "archived";
+  targetMinSeconds: number;
+  targetMaxSeconds: number;
+  role: "member" | "admin" | null;
+};
+type ProjectMembership = {
+  projectId: string;
+  userId: string;
+  role: "member" | "admin";
+  status: "active" | "suspended";
+};
+type ProjectUser = {
+  id: string;
+  email: string;
+  displayName: string;
+  isAppAdmin: boolean;
+};
 type AdminPiecePatch = Pick<
   Piece,
   | "title"
@@ -221,8 +241,8 @@ const pieces = rawPieces as Piece[];
 const TARGET_MIN = 25 * 60;
 const TARGET_MAX = 30 * 60;
 const TIME_SCALE_MAX = 40 * 60;
-const ACTIVE_PROJECT_ID = "20270000-0000-4000-8000-000000000001";
 const BUILD_ID = process.env.NEXT_PUBLIC_BUILD_ID ?? "development";
+const ACTIVE_PROJECT_KEY = "setlist-o-mat:active-project";
 const emptyPiece: Piece = {
   id: 0,
   title: "Neues Stück",
@@ -818,6 +838,13 @@ export default function Home() {
   );
   const [members, setMembers] = useState<Member[]>([]);
   const [allowedEmails, setAllowedEmails] = useState<AllowedEmail[]>([]);
+  const [projects, setProjects] = useState<Project[]>([]);
+  const [activeProjectId, setActiveProjectId] = useState<string | null>(null);
+  const [projectUsers, setProjectUsers] = useState<ProjectUser[]>([]);
+  const [projectMemberships, setProjectMemberships] = useState<
+    ProjectMembership[]
+  >([]);
+  const [projectMenuOpen, setProjectMenuOpen] = useState(false);
   const [profileDisplayName, setProfileDisplayName] = useState<string | null>(
     null,
   );
@@ -868,6 +895,8 @@ export default function Home() {
     temporaryPassword !== null ||
     addPieceToSetlistId !== null ||
     setlistSaveState === "saving";
+  const activeProject =
+    projects.find((project) => project.id === activeProjectId) ?? null;
 
   useEffect(() => {
     let active = true;
@@ -1119,10 +1148,69 @@ export default function Home() {
         );
         setShowProfileDialog(!confirmedAt);
       }
+      const { data: dbProjects, error: projectsError } = await supabase
+        .from("projects")
+        .select(
+          "id, name, status, target_min_seconds, target_max_seconds, project_members(user_id, role, status)",
+        )
+        .order("created_at", { ascending: true });
+      if (projectsError || !dbProjects) {
+        if (active) setToast("Projekte konnten nicht geladen werden");
+        return;
+      }
+      const mappedProjects: Project[] = dbProjects.map((project) => {
+        const ownMembership = (project.project_members ?? []).find(
+          (membership) => membership.user_id === session.user.id,
+        );
+        return {
+          id: project.id,
+          name: project.name,
+          status: project.status as Project["status"],
+          targetMinSeconds: project.target_min_seconds,
+          targetMaxSeconds: project.target_max_seconds,
+          role: ownMembership?.role ??
+            (currentProfile?.is_app_admin ? "admin" : null),
+        };
+      });
+      if (active) setProjects(mappedProjects);
+      const linkedProjectId = new URL(window.location.href).searchParams.get(
+        "project",
+      );
+      const storedProjectId = window.localStorage.getItem(ACTIVE_PROJECT_KEY);
+      const selectedProjectId = mappedProjects.some(
+        (project) => project.id === activeProjectId,
+      )
+        ? activeProjectId
+        : mappedProjects.find((project) => project.id === linkedProjectId)?.id ??
+          mappedProjects.find((project) => project.id === storedProjectId)?.id ??
+          mappedProjects.find((project) => project.status === "active")?.id ??
+          mappedProjects[0]?.id ??
+          null;
+      if (selectedProjectId !== activeProjectId) {
+        if (active) {
+          setActiveProjectId(selectedProjectId);
+          setProjectDataReady(!selectedProjectId);
+        }
+        return;
+      }
+      if (!selectedProjectId) {
+        if (active) setProjectDataReady(true);
+        return;
+      }
+      window.localStorage.setItem(ACTIVE_PROJECT_KEY, selectedProjectId);
+      if (linkedProjectId !== selectedProjectId) {
+        const projectUrl = new URL(window.location.href);
+        projectUrl.searchParams.set("project", selectedProjectId);
+        window.history.replaceState(
+          null,
+          "",
+          `${projectUrl.pathname}${projectUrl.search}${projectUrl.hash}`,
+        );
+      }
       const { data: dbPieces, error: piecesError } = await supabase
         .from("pieces")
         .select("*")
-        .eq("project_id", ACTIVE_PROJECT_ID)
+        .eq("project_id", selectedProjectId)
         .eq("archived", false);
       if (piecesError || !dbPieces) {
         if (active) setToast("Supabase-Daten konnten nicht geladen werden");
@@ -1166,7 +1254,7 @@ export default function Home() {
           .select(
             "id, name, owner_id, state, setlist_items(piece_id, position)",
           )
-          .eq("project_id", ACTIVE_PROJECT_ID),
+          .eq("project_id", selectedProjectId),
         supabase
           .from("setlist_ratings")
           .select("setlist_id, user_id, stars, comment, created_at")
@@ -1176,8 +1264,8 @@ export default function Home() {
           .select("id, email, display_name, is_app_admin, last_seen_at"),
         supabase
           .from("project_members")
-          .select("user_id, status")
-          .eq("project_id", ACTIVE_PROJECT_ID)
+          .select("user_id, role, status")
+          .eq("project_id", selectedProjectId)
           .eq("status", "active"),
         currentProfile?.is_app_admin
           ? supabase.from("signup_allowed_emails").select("email, display_name")
@@ -1299,6 +1387,26 @@ export default function Home() {
           displayName: entry.display_name,
         })),
       );
+      if (currentProfile?.is_app_admin) {
+        setProjectUsers(
+          (dbProfiles ?? []).map((profile) => ({
+            id: profile.id,
+            email: profile.email,
+            displayName: profile.display_name,
+            isAppAdmin: profile.is_app_admin,
+          })),
+        );
+        setProjectMemberships(
+          (dbProjects ?? []).flatMap((project) =>
+            (project.project_members ?? []).map((membership) => ({
+              projectId: project.id,
+              userId: membership.user_id,
+              role: membership.role as ProjectMembership["role"],
+              status: membership.status as ProjectMembership["status"],
+            })),
+          ),
+        );
+      }
       setSetlists(
         (dbSetlists ?? []).map((setlist) => {
           const listRatings = allSetlistRatings.filter(
@@ -1349,12 +1457,13 @@ export default function Home() {
     return () => {
       active = false;
     };
-  }, [session, supabase]);
+  }, [activeProjectId, session, supabase]);
 
   useEffect(() => {
     if (!supabase || !session) return;
     const userId = session.user.id;
-    const channel = supabase.channel(`project:${ACTIVE_PROJECT_ID}:presence`, {
+    if (!activeProjectId) return;
+    const channel = supabase.channel(`project:${activeProjectId}:presence`, {
       config: { presence: { key: userId, enabled: true } },
     });
     const syncPresence = () => {
@@ -1403,7 +1512,7 @@ export default function Home() {
       void channel.untrack();
       void supabase.removeChannel(channel);
     };
-  }, [session, supabase]);
+  }, [activeProjectId, session, supabase]);
 
   useEffect(() => {
     if (!supabase || !session || !isAdmin) return;
@@ -1599,6 +1708,38 @@ export default function Home() {
             ? setlistsHash(setlistFilter, setlistSort, onlyUnratedSetlists)
             : "admin",
     );
+  };
+  const switchProject = (projectId: string) => {
+    if (projectId === activeProjectId) {
+      setProjectMenuOpen(false);
+      return;
+    }
+    if (
+      setlistSaveState === "saving" &&
+      !window.confirm(
+        "Die Setlist wird noch gespeichert. Projekt trotzdem wechseln?",
+      )
+    )
+      return;
+    window.localStorage.setItem(ACTIVE_PROJECT_KEY, projectId);
+    const projectUrl = new URL(window.location.href);
+    projectUrl.searchParams.set("project", projectId);
+    window.history.replaceState(
+      null,
+      "",
+      `${projectUrl.pathname}${projectUrl.search}${projectUrl.hash}`,
+    );
+    setProjectDataReady(false);
+    setActivePieceId(null);
+    setActiveSetlistId(null);
+    setBuilderId(null);
+    setComparisonIds([]);
+    setComparisonOpen(false);
+    setCompareMode(false);
+    setProjectMenuOpen(false);
+    setActiveProjectId(projectId);
+    setView("home");
+    writeAppHash("uebersicht", true);
   };
   const openPiece = (pieceId: number) => {
     const preserveFilters = view === "pieces";
@@ -1926,11 +2067,11 @@ export default function Home() {
   };
   const createSetlist = async () => {
     const name = uniqueSetlistName(setlists.map((item) => item.name));
-    if (supabase && session) {
+    if (supabase && session && activeProjectId) {
       const { data, error } = await supabase
         .from("setlists")
         .insert({
-          project_id: ACTIVE_PROJECT_ID,
+          project_id: activeProjectId,
           owner_id: session.user.id,
           name,
           state: "draft",
@@ -1987,11 +2128,11 @@ export default function Home() {
     )
       variant += 1;
     const name = `${baseName} – Variante ${variant}`;
-    if (supabase && session) {
+    if (supabase && session && activeProjectId) {
       const { data, error } = await supabase
         .from("setlists")
         .insert({
-          project_id: ACTIVE_PROJECT_ID,
+          project_id: activeProjectId,
           owner_id: session.user.id,
           name,
           state: "draft",
@@ -2146,7 +2287,7 @@ export default function Home() {
           await supabase
             .from("setlists")
             .update({ state: "finalist" })
-            .eq("project_id", ACTIVE_PROJECT_ID)
+            .eq("project_id", activeProjectId)
             .eq("state", "final");
         await supabase
           .from("setlists")
@@ -2285,6 +2426,155 @@ export default function Home() {
     );
     flash("Freigabe entfernt");
   };
+  const createProject = async () => {
+    if (!supabase || !session || !isAdmin) return;
+    const name = window.prompt("Wie soll das neue Projekt heißen?")?.trim();
+    if (!name) return;
+    const copyCatalogue = window.confirm(
+      "Den Stückkatalog des aktuell geöffneten Projekts kopieren? Bewertungen und Setlists werden nicht übernommen.",
+    );
+    const { data: created, error } = await supabase
+      .from("projects")
+      .insert({
+        name,
+        created_by: session.user.id,
+        target_min_seconds: activeProject?.targetMinSeconds ?? TARGET_MIN,
+        target_max_seconds: activeProject?.targetMaxSeconds ?? TARGET_MAX,
+      })
+      .select("id, name, status, target_min_seconds, target_max_seconds")
+      .single();
+    if (error || !created) {
+      flash("Projekt konnte nicht angelegt werden");
+      return;
+    }
+    const { error: membershipError } = await supabase
+      .from("project_members")
+      .insert({
+        project_id: created.id,
+        user_id: session.user.id,
+        role: "admin",
+        status: "active",
+      });
+    if (membershipError) {
+      flash("Projekt wurde angelegt, aber die Admin-Zuweisung fehlt");
+      return;
+    }
+    if (copyCatalogue && activeProjectId) {
+      const { data: sourcePieces, error: sourceError } = await supabase
+        .from("pieces")
+        .select(
+          "import_key, title, composer, duration_seconds, grade, price_cents, owned, genres, sample_url, purchase_url, solo_status, solos, source, subtitle, note, archived",
+        )
+        .eq("project_id", activeProjectId);
+      if (sourceError) {
+        flash("Projekt angelegt; der Stückkatalog konnte nicht gelesen werden");
+      } else if (sourcePieces?.length) {
+        const { error: copyError } = await supabase.from("pieces").insert(
+          sourcePieces.map((piece) => ({ ...piece, project_id: created.id })),
+        );
+        if (copyError)
+          flash("Projekt angelegt; der Stückkatalog konnte nicht kopiert werden");
+      }
+    }
+    const project: Project = {
+      id: created.id,
+      name: created.name,
+      status: created.status,
+      targetMinSeconds: created.target_min_seconds,
+      targetMaxSeconds: created.target_max_seconds,
+      role: "admin",
+    };
+    setProjects((current) => [...current, project]);
+    setProjectMemberships((current) => [
+      ...current,
+      {
+        projectId: created.id,
+        userId: session.user.id,
+        role: "admin",
+        status: "active",
+      },
+    ]);
+    switchProject(created.id);
+    flash(copyCatalogue ? "Projekt mit Stückkatalog angelegt" : "Projekt angelegt");
+  };
+  const updateProjectMembership = async (
+    projectId: string,
+    userId: string,
+    enabled: boolean,
+  ) => {
+    if (!supabase || !isAdmin) return;
+    if (!enabled && userId === session?.user.id && projectId === activeProjectId) {
+      flash("Du kannst dich nicht aus dem aktiven Projekt entfernen");
+      return;
+    }
+    const existing = projectMemberships.find(
+      (membership) =>
+        membership.projectId === projectId && membership.userId === userId,
+    );
+    const { error } = enabled
+      ? await supabase.from("project_members").upsert(
+          {
+            project_id: projectId,
+            user_id: userId,
+            role: existing?.role ?? "member",
+            status: "active",
+          },
+          { onConflict: "project_id,user_id" },
+        )
+      : await supabase
+          .from("project_members")
+          .delete()
+          .eq("project_id", projectId)
+          .eq("user_id", userId);
+    if (error) {
+      flash("Projektzuweisung konnte nicht geändert werden");
+      return;
+    }
+    setProjectMemberships((current) =>
+      enabled
+        ? [
+            ...current.filter(
+              (membership) =>
+                membership.projectId !== projectId ||
+                membership.userId !== userId,
+            ),
+            {
+              projectId,
+              userId,
+              role: existing?.role ?? "member",
+              status: "active",
+            },
+          ]
+        : current.filter(
+            (membership) =>
+              membership.projectId !== projectId ||
+              membership.userId !== userId,
+          ),
+    );
+  };
+  const updateProjectRole = async (
+    projectId: string,
+    userId: string,
+    role: ProjectMembership["role"],
+  ) => {
+    if (!supabase || !isAdmin) return;
+    const { error } = await supabase
+      .from("project_members")
+      .update({ role })
+      .eq("project_id", projectId)
+      .eq("user_id", userId);
+    if (error) {
+      flash("Projektrolle konnte nicht geändert werden");
+      return;
+    }
+    setProjectMemberships((current) =>
+      current.map((membership) =>
+        membership.projectId === projectId && membership.userId === userId
+          ? { ...membership, role }
+          : membership,
+      ),
+    );
+  };
   const deleteMember = async (member: Member) => {
     const warning = `${member.displayName} wirklich vollständig löschen?\n\nDabei werden auch alle Bewertungen, Kommentare und eigenen Setlists dieses Kontos unwiderruflich gelöscht.`;
     if (
@@ -2398,12 +2688,12 @@ export default function Home() {
     return true;
   };
   const createPiece = async (patch: AdminPiecePatch) => {
-    if (!supabase || !session || !isAdmin) return false;
+    if (!supabase || !session || !isAdmin || !activeProjectId) return false;
     const localId = Math.max(0, ...catalogue.map((piece) => piece.id)) + 1;
     const { data, error } = await supabase
       .from("pieces")
       .insert({
-        project_id: ACTIVE_PROJECT_ID,
+        project_id: activeProjectId,
         import_key: `manual-${localId}`,
         title: patch.title,
         composer: patch.composer,
@@ -2607,6 +2897,20 @@ export default function Home() {
         onSignOut={() => void supabase.auth.signOut()}
       />
     );
+  if (supabase && session && projectDataReady && !activeProject)
+    return (
+      <div className="auth-loading">
+        <AppMark />
+        <strong>Noch keinem Projekt zugeordnet</strong>
+        <p>
+          Dein Konto ist eingerichtet. Ein Administrator muss dich noch einem
+          Projekt zuweisen.
+        </p>
+        <button className="secondary-button" onClick={() => supabase.auth.signOut()}>
+          <LogOut /> Abmelden
+        </button>
+      </div>
+    );
 
   return (
     <main className="app-shell">
@@ -2642,12 +2946,31 @@ export default function Home() {
         </nav>
         <div className="side-project">
           <span>Aktives Projekt</span>
-          <button>
+          <button
+            onClick={() => setProjectMenuOpen((open) => !open)}
+            aria-expanded={projectMenuOpen}
+          >
             <span>
-              <Music2 /> Jahreskonzert 2027
+              <Music2 /> {activeProject?.name ?? "Kein Projekt"}
             </span>
             <ChevronDown />
           </button>
+          {projectMenuOpen && projects.length > 0 && (
+            <div className="project-menu">
+              {projects.map((project) => (
+                <button
+                  key={project.id}
+                  className={project.id === activeProjectId ? "active" : ""}
+                  onClick={() => switchProject(project.id)}
+                >
+                  <span>
+                    <Music2 /> {project.name}
+                  </span>
+                  {project.id === activeProjectId && <Check />}
+                </button>
+              ))}
+            </div>
+          )}
         </div>
         <div
           className="side-online"
@@ -2697,6 +3020,20 @@ export default function Home() {
             <strong>Setlist-o-Mat</strong>
           </div>
           <div className="mobile-header-actions">
+            {projects.length > 1 && activeProjectId && (
+              <select
+                className="mobile-project-select"
+                aria-label="Aktives Projekt"
+                value={activeProjectId}
+                onChange={(event) => switchProject(event.target.value)}
+              >
+                {projects.map((project) => (
+                  <option key={project.id} value={project.id}>
+                    {project.name}
+                  </option>
+                ))}
+              </select>
+            )}
             <span
               className="mobile-online"
               title={`${onlineMembers.length} online`}
@@ -3774,6 +4111,93 @@ export default function Home() {
                 </div>
               </article>
             </div>
+            <article className="content-card project-admin-card">
+              <div className="section-title">
+                <div>
+                  <span className="eyebrow">Projekte</span>
+                  <h2>Projekte und Zuweisungen</h2>
+                  <p>
+                    Mitglieder sehen ausschließlich die Projekte, denen sie
+                    hier zugeordnet sind.
+                  </p>
+                </div>
+                <button className="secondary-button" onClick={() => void createProject()}>
+                  <Plus /> Projekt anlegen
+                </button>
+              </div>
+              <div className="project-admin-list">
+                {projects.map((project) => {
+                  const assigned = projectMemberships.filter(
+                    (membership) =>
+                      membership.projectId === project.id &&
+                      membership.status === "active",
+                  );
+                  return (
+                    <section key={project.id} className="project-admin-item">
+                      <header>
+                        <button
+                          className="project-admin-title"
+                          onClick={() => switchProject(project.id)}
+                        >
+                          <Music2 />
+                          <span>
+                            <strong>{project.name}</strong>
+                            <small>
+                              {assigned.length} {assigned.length === 1 ? "Mitglied" : "Mitglieder"}
+                              {project.id === activeProjectId ? " · aktiv" : ""}
+                            </small>
+                          </span>
+                        </button>
+                      </header>
+                      <div className="project-assignment-list">
+                        {projectUsers.map((user) => {
+                          const membership = assigned.find(
+                            (item) => item.userId === user.id,
+                          );
+                          return (
+                            <div key={user.id} className="project-assignment-row">
+                              <label>
+                                <input
+                                  type="checkbox"
+                                  checked={Boolean(membership)}
+                                  onChange={(event) =>
+                                    void updateProjectMembership(
+                                      project.id,
+                                      user.id,
+                                      event.target.checked,
+                                    )
+                                  }
+                                />
+                                <span>
+                                  <strong>{user.displayName}</strong>
+                                  <small>{user.email}</small>
+                                </span>
+                              </label>
+                              {membership && (
+                                <select
+                                  aria-label={`Rolle von ${user.displayName} in ${project.name}`}
+                                  value={membership.role}
+                                  onChange={(event) =>
+                                    void updateProjectRole(
+                                      project.id,
+                                      user.id,
+                                      event.target.value as ProjectMembership["role"],
+                                    )
+                                  }
+                                >
+                                  <option value="member">Mitglied</option>
+                                  <option value="admin">Projekt-Admin</option>
+                                </select>
+                              )}
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </section>
+                  );
+                })}
+              </div>
+            </article>
             <div className="admin-columns">
               <article className="content-card admin-table-card">
                 <div className="section-title">

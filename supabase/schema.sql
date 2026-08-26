@@ -406,11 +406,8 @@ begin
     false
   );
 
-  insert into public.project_members (project_id, user_id, role)
-  select p.id, new.id, 'member'::public.project_role
-  from public.projects p
-  where p.status = 'active'
-  on conflict (project_id, user_id) do nothing;
+  -- Project membership is assigned explicitly by an app or project admin.
+  -- This keeps newly registered test accounts and future ensembles isolated.
   return new;
 end;
 $$;
