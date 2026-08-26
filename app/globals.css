@@ -5466,6 +5466,9 @@ small {
 .setlist-review-list header {
   align-items: center;
 }
+.setlist-review-list article.editing {
+  opacity: 0.55;
+}
 .setlist-review-list .review-author {
   display: inline-flex;
   align-items: center;
@@ -5486,6 +5489,37 @@ small {
   font-style: normal;
   font-weight: 800;
 }
+.review-own-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  margin-left: auto;
+}
+.review-own-actions button {
+  min-height: 27px;
+  border: 0;
+  border-radius: 7px;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 6px;
+  background: transparent;
+  color: var(--purple);
+  font-size: 9px;
+  font-weight: 750;
+  cursor: pointer;
+}
+.review-own-actions button:hover:not(:disabled) {
+  background: #fff;
+}
+.review-own-actions button:disabled {
+  cursor: default;
+  opacity: 0.45;
+}
+.review-own-actions svg {
+  width: 12px;
+  height: 12px;
+}
 .setlist-review-list article.group-member .display-stars,
 .setlist-review-list article.group-member .display-stars svg {
   color: #817b86 !important;
@@ -5497,6 +5531,16 @@ small {
 .setlist-review-list .no-comment {
   color: #99929d;
   font-style: italic;
+}
+@media (max-width: 560px) {
+  .setlist-review-list header {
+    flex-wrap: wrap;
+  }
+  .review-own-actions {
+    order: 3;
+    flex-basis: 100%;
+    margin-left: 20px;
+  }
 }
 .setlist-view-actions {
   position: static;

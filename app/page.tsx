@@ -5759,14 +5759,33 @@ function SetlistDialog({
                         return (
                           <article
                             key={review.userId}
-                            className={isOwnReview ? "own" : "group-member"}
+                            className={`${isOwnReview ? "own" : "group-member"}${isOwnReview && editingRating ? " editing" : ""}`}
                           >
                             <header>
                               <span className="review-author">
                                 <UserRound />
                                 <strong>{review.author}</strong>
-                                {isOwnReview && <em>(Du)</em>}
+                                {isOwnReview && <em>Du</em>}
                               </span>
+                              {isOwnReview && (
+                                <div className="review-own-actions">
+                                  <button
+                                    disabled={editingRating || resetting}
+                                    onClick={() => setEditingRating(true)}
+                                  >
+                                    <Pencil /> Ändern
+                                  </button>
+                                  <button
+                                    disabled={resetting}
+                                    onClick={() => void reset()}
+                                  >
+                                    <X />
+                                    {resetting
+                                      ? "Wird zurückgesetzt …"
+                                      : "Zurücksetzen"}
+                                  </button>
+                                </div>
+                              )}
                               <DisplayStars value={review.stars} />
                             </header>
                             <p
@@ -5786,28 +5805,6 @@ function SetlistDialog({
                     </p>
                   )}
                 </section>
-                {rating && !editingRating && (
-                  <section
-                    className="setlist-own-rating-summary"
-                    aria-label="Deine Bewertung"
-                  >
-                    <div>
-                      <UserRound />
-                      <span>Deine Bewertung</span>
-                    </div>
-                    <DisplayStars value={rating.stars} />
-                    <strong>{rating.stars}</strong>
-                    <div className="setlist-own-rating-actions">
-                      <button onClick={() => setEditingRating(true)}>
-                        <Pencil /> Ändern
-                      </button>
-                      <button disabled={resetting} onClick={() => void reset()}>
-                        <X />{" "}
-                        {resetting ? "Wird zurückgesetzt …" : "Zurücksetzen"}
-                      </button>
-                    </div>
-                  </section>
-                )}
                 {editingRating && (
                   <section className="rating-panel setlist-own-rating">
                     <h3>
