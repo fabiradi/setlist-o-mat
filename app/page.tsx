@@ -148,6 +148,7 @@ type AppRoute = {
   pieceSort: PieceSort;
   setlistFilter: SetlistFilter;
   setlistSort: SetlistSort;
+  onlyUnratedSetlists: boolean;
 };
 type YouTubePlayer = {
   cuePlaylist: (
@@ -483,6 +484,7 @@ function parseAppHash(hash: string): AppRoute {
       pieceSort: parsePieceSort(params.get("sort")),
       setlistFilter: "all",
       setlistSort: "rating-desc",
+      onlyUnratedSetlists: false,
     };
   if (base === "setlists") {
     const rawId = segments[1];
@@ -508,6 +510,7 @@ function parseAppHash(hash: string): AppRoute {
           ? filter
           : "all",
       setlistSort: parseSetlistSort(params.get("sort")),
+      onlyUnratedSetlists: params.get("unbewertet") === "1",
     };
   }
   if (base === "admin")
@@ -522,6 +525,7 @@ function parseAppHash(hash: string): AppRoute {
       pieceSort: "title",
       setlistFilter: "all",
       setlistSort: "rating-desc",
+      onlyUnratedSetlists: false,
     };
   return {
     view: "home",
@@ -534,6 +538,7 @@ function parseAppHash(hash: string): AppRoute {
     pieceSort: "title",
     setlistFilter: "all",
     setlistSort: "rating-desc",
+    onlyUnratedSetlists: false,
   };
 }
 function writeAppHash(hash: string, replace = false) {
@@ -581,10 +586,12 @@ function pieceDetailHash(
 function setlistsHash(
   filter: SetlistFilter,
   sort: SetlistSort = "rating-desc",
+  onlyUnrated = false,
 ) {
   const params = new URLSearchParams();
   if (filter !== "all") params.set("filter", filter);
   if (sort !== "rating-desc") params.set("sort", sort);
+  if (onlyUnrated) params.set("unbewertet", "1");
   return `setlists${params.size ? `?${params}` : ""}`;
 }
 function getMissingPieceFields(piece: Piece) {
@@ -779,6 +786,7 @@ export default function Home() {
   >({});
   const [setlistFilter, setSetlistFilter] = useState<SetlistFilter>("all");
   const [setlistSort, setSetlistSort] = useState<SetlistSort>("rating-desc");
+  const [onlyUnratedSetlists, setOnlyUnratedSetlists] = useState(false);
   const [showConsensus, setShowConsensus] = useState(true);
   const [builderId, setBuilderId] = useState<number | string | null>(null);
   const [remotePieceIds, setRemotePieceIds] = useState<Record<number, string>>(
@@ -927,6 +935,7 @@ export default function Home() {
       if (route.view === "setlists") {
         setSetlistFilter(route.setlistFilter);
         setSetlistSort(route.setlistSort);
+        setOnlyUnratedSetlists(route.onlyUnratedSetlists);
       }
     };
     if (!window.location.hash) writeAppHash("uebersicht", true);
@@ -942,8 +951,18 @@ export default function Home() {
 
   useEffect(() => {
     if (view === "setlists" && activeSetlistId === null && builderId === null)
-      writeAppHash(setlistsHash(setlistFilter, setlistSort), true);
-  }, [activeSetlistId, builderId, setlistFilter, setlistSort, view]);
+      writeAppHash(
+        setlistsHash(setlistFilter, setlistSort, onlyUnratedSetlists),
+        true,
+      );
+  }, [
+    activeSetlistId,
+    builderId,
+    onlyUnratedSetlists,
+    setlistFilter,
+    setlistSort,
+    view,
+  ]);
 
   useEffect(() => {
     const timer = window.setTimeout(
@@ -1479,7 +1498,10 @@ export default function Home() {
         );
       } else {
         setActiveSetlistId(null);
-        writeAppHash(setlistsHash(setlistFilter, setlistSort), true);
+        writeAppHash(
+          setlistsHash(setlistFilter, setlistSort, onlyUnratedSetlists),
+          true,
+        );
         setToast("Diese private Setlist ist nicht verfügbar");
       }
     }, 0);
@@ -1556,7 +1578,7 @@ export default function Home() {
         : nextView === "pieces"
           ? piecesHash(search, genre, onlyOpen, pieceSort)
           : nextView === "setlists"
-            ? setlistsHash(setlistFilter, setlistSort)
+            ? setlistsHash(setlistFilter, setlistSort, onlyUnratedSetlists)
             : "admin",
     );
   };
@@ -1589,7 +1611,10 @@ export default function Home() {
   };
   const closeSetlist = () => {
     setActiveSetlistId(null);
-    writeAppHash(setlistsHash(setlistFilter, setlistSort), true);
+    writeAppHash(
+      setlistsHash(setlistFilter, setlistSort, onlyUnratedSetlists),
+      true,
+    );
   };
   const showBuilder = (setlistId: number | string) => {
     setView("setlists");
@@ -1616,7 +1641,10 @@ export default function Home() {
   };
   const closeBuilder = () => {
     setBuilderId(null);
-    writeAppHash(setlistsHash(setlistFilter, setlistSort), true);
+    writeAppHash(
+      setlistsHash(setlistFilter, setlistSort, onlyUnratedSetlists),
+      true,
+    );
   };
   const incompletePieceCount = catalogue.filter(
     (piece) => getMissingPieceFields(piece).length > 0,
@@ -2025,7 +2053,10 @@ export default function Home() {
     if (builderId === setlist.id || activeSetlistId === setlist.id) {
       setBuilderId(null);
       setActiveSetlistId(null);
-      writeAppHash(setlistsHash(setlistFilter, setlistSort), true);
+      writeAppHash(
+        setlistsHash(setlistFilter, setlistSort, onlyUnratedSetlists),
+        true,
+      );
     }
     flash(
       isPublished
@@ -2428,13 +2459,15 @@ export default function Home() {
   const visibleSetlists = setlists
     .filter(
       (item) =>
-        setlistFilter === "all" ||
-        (setlistFilter === "finalists" &&
-          (item.state === "finalist" || item.state === "final")) ||
-        (setlistFilter === "mine" && item.state === "draft" && isOwn(item)) ||
-        (setlistFilter === "mine-published" &&
-          item.state !== "draft" &&
-          isOwn(item)),
+        (!onlyUnratedSetlists ||
+          (item.state !== "draft" && !setlistRatings[String(item.id)])) &&
+        (setlistFilter === "all" ||
+          (setlistFilter === "finalists" &&
+            (item.state === "finalist" || item.state === "final")) ||
+          (setlistFilter === "mine" && item.state === "draft" && isOwn(item)) ||
+          (setlistFilter === "mine-published" &&
+            item.state !== "draft" &&
+            isOwn(item))),
     )
     .sort((a, b) => {
       if (setlistSort === "name") return a.name.localeCompare(b.name, "de");
@@ -3022,7 +3055,10 @@ export default function Home() {
                 className={setlistFilter === "all" ? "active" : ""}
                 onClick={() => {
                   setSetlistFilter("all");
-                  writeAppHash(setlistsHash("all", setlistSort), true);
+                  writeAppHash(
+                    setlistsHash("all", setlistSort, onlyUnratedSetlists),
+                    true,
+                  );
                 }}
               >
                 Alle <span>{setlists.length}</span>
@@ -3033,7 +3069,10 @@ export default function Home() {
                 className={setlistFilter === "finalists" ? "active" : ""}
                 onClick={() => {
                   setSetlistFilter("finalists");
-                  writeAppHash(setlistsHash("finalists", setlistSort), true);
+                  writeAppHash(
+                    setlistsHash("finalists", setlistSort, onlyUnratedSetlists),
+                    true,
+                  );
                 }}
               >
                 Finalrunde{" "}
@@ -3052,7 +3091,10 @@ export default function Home() {
                 className={setlistFilter === "mine" ? "active" : ""}
                 onClick={() => {
                   setSetlistFilter("mine");
-                  writeAppHash(setlistsHash("mine", setlistSort), true);
+                  writeAppHash(
+                    setlistsHash("mine", setlistSort, onlyUnratedSetlists),
+                    true,
+                  );
                 }}
               >
                 Meine Entwürfe <span>{ownDraftCount}</span>
@@ -3064,7 +3106,11 @@ export default function Home() {
                 onClick={() => {
                   setSetlistFilter("mine-published");
                   writeAppHash(
-                    setlistsHash("mine-published", setlistSort),
+                    setlistsHash(
+                      "mine-published",
+                      setlistSort,
+                      onlyUnratedSetlists,
+                    ),
                     true,
                   );
                 }}
@@ -3084,9 +3130,7 @@ export default function Home() {
                 >
                   <option value="rating-desc">Gruppenbewertung</option>
                   <option value="progress-desc">Bewertungsfortschritt</option>
-                  {showConsensus && (
-                    <option value="agreement-desc">Übereinstimmung</option>
-                  )}
+                  <option value="agreement-desc">Übereinstimmung</option>
                   <option value="name">Name A–Z</option>
                 </select>
                 <ChevronDown />
@@ -3103,11 +3147,16 @@ export default function Home() {
                   );
                   if (!next && pieceSort === "frequency-desc")
                     setPieceSort("title");
-                  if (!next && setlistSort === "agreement-desc")
-                    setSetlistSort("rating-desc");
                 }}
               >
                 {showConsensus ? <Eye /> : <EyeOff />} Häufigkeit
+              </button>
+              <button
+                className={`toggle ${onlyUnratedSetlists ? "active" : ""}`}
+                aria-pressed={onlyUnratedSetlists}
+                onClick={() => setOnlyUnratedSetlists((value) => !value)}
+              >
+                <span /> Noch nicht bewertet
               </button>
             </div>
             {visibleSetlists.length ? (
@@ -3192,11 +3241,13 @@ export default function Home() {
                           {isOwnSetlist ? "von dir" : `von ${setlist.owner}`} ·{" "}
                           {setlist.pieceIds.length} Stücke
                         </span>
-                        {ownSetlistRating && setlist.state !== "draft" && (
-                          <span className="setlist-self-rated">
-                            <Check /> Von dir bewertet
-                          </span>
-                        )}
+                        <span
+                          className="setlist-card-agreement"
+                          title="Übereinstimmung mit den anderen veröffentlichten Setlists"
+                        >
+                          <Activity />{" "}
+                          {agreement === null ? "–" : `${agreement}%`}
+                        </span>
                       </p>
                       <TimeSignal duration={metrics.duration} compact />
                       <div className="setlist-piece-preview">
@@ -3252,9 +3303,6 @@ export default function Home() {
                           </span>
                         ))}
                       </div>
-                      {showConsensus && (
-                        <AgreementIndicator value={agreement} compact />
-                      )}
                       <div className="setlist-footer">
                         {setlist.state === "draft" ? (
                           isOwnSetlist ? (
@@ -3356,11 +3404,13 @@ export default function Home() {
                 <ListMusic />
                 <strong>Hier ist noch nichts gelandet.</strong>
                 <span>
-                  {setlistFilter === "mine"
-                    ? "Lege eine neue Setlist an – sie bleibt bis zur Veröffentlichung privat."
-                    : setlistFilter === "mine-published"
-                      ? "Du hast noch keine eigene Setlist veröffentlicht."
-                      : "Sobald eine Setlist für diese Auswahl passt, erscheint sie hier."}
+                  {onlyUnratedSetlists
+                    ? "Alle Setlists in dieser Auswahl sind von dir bewertet."
+                    : setlistFilter === "mine"
+                      ? "Lege eine neue Setlist an – sie bleibt bis zur Veröffentlichung privat."
+                      : setlistFilter === "mine-published"
+                        ? "Du hast noch keine eigene Setlist veröffentlicht."
+                        : "Sobald eine Setlist für diese Auswahl passt, erscheint sie hier."}
                 </span>
               </div>
             )}
@@ -5138,7 +5188,7 @@ function BuilderDialog({
               <span className="builder-piece-count">
                 {setlist.pieceIds.length} Stücke
               </span>
-              {showConsensus && <AgreementIndicator value={agreement} />}
+              <AgreementIndicator value={agreement} />
               {saveState === "error" && setlist.name.trim() ? (
                 <button
                   className={`builder-save-state ${saveState}`}
@@ -5481,6 +5531,7 @@ function SetlistDialog({
   const [stars, setStars] = useState<number | null>(rating?.stars ?? null);
   const [comment, setComment] = useState(rating?.comment ?? "");
   const [resetting, setResetting] = useState(false);
+  const [editingRating, setEditingRating] = useState(!rating);
   const [activePreviewPieceId, setActivePreviewPieceId] = useState<
     number | null
   >(null);
@@ -5491,11 +5542,11 @@ function SetlistDialog({
     (piece) => piece.soloStatus === "available",
   ).length;
   const statusLabel = isDraft
-    ? "Entwurf · schreibgeschützt"
+    ? "Entwurf"
     : setlist.state === "final"
       ? "Finale Setlist"
       : setlist.state === "finalist"
-        ? "Finalist"
+        ? "Finalrunde"
         : "Veröffentlicht";
   const reset = async () => {
     if (
@@ -5522,27 +5573,33 @@ function SetlistDialog({
       >
         <header className="builder-header">
           <div>
-            <span
-              className={`builder-draft-status setlist-state-${setlist.state}`}
-            >
-              {isDraft ? (
-                <Lock />
-              ) : setlist.state === "final" || setlist.state === "finalist" ? (
-                <Trophy />
-              ) : (
-                <ListMusic />
-              )}
-              {statusLabel}
-            </span>
             <div className="builder-title-row setlist-view-title">
-              <ListMusic aria-hidden="true" />
+              <span
+                className={`setlist-dialog-state-icon state-${setlist.state}`}
+                title={statusLabel}
+                aria-label={statusLabel}
+              >
+                {isDraft ? (
+                  <Lock />
+                ) : setlist.state === "final" ||
+                  setlist.state === "finalist" ? (
+                  <Trophy />
+                ) : (
+                  <ListMusic />
+                )}
+              </span>
               <h2>{setlist.name}</h2>
+              {setlist.state !== "published" && (
+                <span className={`status-pill ${setlist.state}`}>
+                  {statusLabel}
+                </span>
+              )}
             </div>
             <div className="builder-header-meta">
               <span className="builder-piece-count">
                 {setlist.pieceIds.length} Stücke
               </span>
-              {showConsensus && <AgreementIndicator value={agreement} />}
+              <AgreementIndicator value={agreement} />
               <span className="setlist-owner">von {setlist.owner}</span>
               <div className="dialog-link-actions">
                 <button
@@ -5606,13 +5663,6 @@ function SetlistDialog({
                     </strong>
                     <span>{piece.composer}</span>
                     <div>
-                      {showConsensus && (
-                        <HotnessIndicator
-                          count={occurrenceCounts[piece.id] ?? 0}
-                          total={publishedCount}
-                          compact
-                        />
-                      )}
                       {piece.soloStatus === "available" && (
                         <em className="builder-solo">
                           <UserRound />{" "}
@@ -5638,6 +5688,13 @@ function SetlistDialog({
                         rating={pieceRatings[piece.id]}
                         groupRating={groupRatings[piece.id]}
                       />
+                      {showConsensus && (
+                        <HotnessIndicator
+                          count={occurrenceCounts[piece.id] ?? 0}
+                          total={publishedCount}
+                          compact
+                        />
+                      )}
                     </div>
                     <span className="builder-item-duration">
                       <Clock3 /> {formatDuration(piece.durationSeconds)}
@@ -5665,23 +5722,6 @@ function SetlistDialog({
                       : "–"}
                   </strong>
                   <small>({setlist.ratingCount})</small>
-                </section>
-                <section className="rating-panel setlist-own-rating">
-                  <h3>Diese Setlist bewerten</h3>
-                  <div className="rating-question">
-                    <span>Wie gut funktioniert diese Reihenfolge?</span>
-                    <Stars value={stars} onChange={setStars} />
-                  </div>
-                  <label>
-                    <span>
-                      Dein Kommentar <small>optional und später änderbar</small>
-                    </span>
-                    <textarea
-                      value={comment}
-                      onChange={(event) => setComment(event.target.value)}
-                      placeholder="Dramaturgie, Dauer, Genre-Mix, Soli …"
-                    />
-                  </label>
                 </section>
                 <section className="setlist-comments" aria-label="Kommentare">
                   <h3>
@@ -5711,49 +5751,81 @@ function SetlistDialog({
                     </p>
                   )}
                 </section>
+                {rating && !editingRating && (
+                  <section
+                    className="setlist-own-rating-summary"
+                    aria-label="Deine Bewertung"
+                  >
+                    <div>
+                      <UserRound />
+                      <span>Deine Bewertung</span>
+                    </div>
+                    <DisplayStars value={rating.stars} />
+                    <strong>{rating.stars}</strong>
+                    <div className="setlist-own-rating-actions">
+                      <button onClick={() => setEditingRating(true)}>
+                        <Pencil /> Ändern
+                      </button>
+                      <button disabled={resetting} onClick={() => void reset()}>
+                        <X />{" "}
+                        {resetting ? "Wird zurückgesetzt …" : "Zurücksetzen"}
+                      </button>
+                    </div>
+                  </section>
+                )}
+                {editingRating && (
+                  <section className="rating-panel setlist-own-rating">
+                    <h3>
+                      {rating ? "Bewertung ändern" : "Diese Setlist bewerten"}
+                    </h3>
+                    <div className="rating-question">
+                      <span>Wie gut funktioniert diese Reihenfolge?</span>
+                      <Stars value={stars} onChange={setStars} />
+                    </div>
+                    <label>
+                      <span>
+                        Dein Kommentar{" "}
+                        <small>optional und später änderbar</small>
+                      </span>
+                      <textarea
+                        value={comment}
+                        onChange={(event) => setComment(event.target.value)}
+                        placeholder="Dramaturgie, Dauer, Genre-Mix, Soli …"
+                      />
+                    </label>
+                    <div className="setlist-rating-form-actions">
+                      <button
+                        className="text-button"
+                        disabled={resetting}
+                        onClick={() => {
+                          if (rating) {
+                            setStars(rating.stars);
+                            setComment(rating.comment);
+                            setEditingRating(false);
+                          } else onClose();
+                        }}
+                      >
+                        Abbrechen
+                      </button>
+                      <button
+                        className="primary-button"
+                        disabled={resetting || !stars}
+                        onClick={() => stars && onSave({ stars, comment })}
+                      >
+                        <Check /> Bewertung speichern
+                      </button>
+                    </div>
+                  </section>
+                )}
               </>
             )}
-            <div className="dialog-actions setlist-view-actions">
-              <div className="dialog-danger-actions">
-                {canDelete && (
-                  <button
-                    className="dialog-danger-button"
-                    disabled={resetting}
-                    onClick={onDelete}
-                  >
-                    <Trash2 /> Setlist löschen
-                  </button>
-                )}
-                {rating && !isDraft && (
-                  <button
-                    className="dialog-danger-button"
-                    disabled={resetting}
-                    onClick={() => void reset()}
-                  >
-                    <X />{" "}
-                    {resetting
-                      ? "Wird zurückgesetzt …"
-                      : "Bewertung zurücksetzen"}
-                  </button>
-                )}
-              </div>
-              <button
-                className="text-button"
-                disabled={resetting}
-                onClick={onClose}
-              >
-                {isDraft ? "Schließen" : "Abbrechen"}
-              </button>
-              {!isDraft && (
-                <button
-                  className="primary-button"
-                  disabled={resetting || !stars}
-                  onClick={() => stars && onSave({ stars, comment })}
-                >
-                  <Check /> Bewertung speichern
+            {isDraft && (
+              <div className="dialog-actions setlist-view-actions">
+                <button className="text-button" onClick={onClose}>
+                  Schließen
                 </button>
-              )}
-            </div>
+              </div>
+            )}
           </div>
           <aside className="builder-summary">
             <span className="eyebrow">Live-Check</span>
@@ -5801,6 +5873,15 @@ function SetlistDialog({
                 )}
               </div>
             </div>
+            {canDelete && (
+              <button
+                className="builder-delete-button"
+                disabled={resetting}
+                onClick={onDelete}
+              >
+                <Trash2 /> Setlist löschen
+              </button>
+            )}
           </aside>
         </div>
       </section>

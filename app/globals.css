@@ -565,6 +565,80 @@ small {
 .setlist-card-rating .setlist-rating-row > span:first-child svg {
   color: var(--muted) !important;
 }
+
+.setlist-card-agreement {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  color: var(--muted);
+  font-weight: 700;
+}
+.setlist-card-agreement:before { content: "·"; margin-right: 2px; }
+.setlist-card-agreement svg { width: 12px; height: 12px; }
+.setlist-dialog-state-icon {
+  width: 36px;
+  height: 36px;
+  border-radius: 11px;
+  display: inline-grid;
+  place-items: center;
+  flex: none;
+  color: var(--purple);
+  background: var(--purple-soft);
+}
+.setlist-dialog-state-icon.state-published { color: #fff; background: var(--green); }
+.setlist-dialog-state-icon.state-draft { color: #736a7d; background: #ece8ef; }
+.setlist-dialog-state-icon.state-finalist,
+.setlist-dialog-state-icon.state-final { color: #936b00; background: var(--yellow-soft); }
+.setlist-dialog-state-icon svg { width: 19px; height: 19px; }
+.setlist-view-title { display: flex; align-items: center; gap: 10px; }
+.setlist-view-title .status-pill { margin-left: 2px; }
+.setlist-view-item .builder-item-actions {
+  grid-template-columns: minmax(0, 1fr) auto auto;
+}
+.setlist-view-item .builder-item-actions > .builder-rating-line > .piece-comments-toggle {
+  grid-column: 1;
+}
+.setlist-view-item .builder-item-actions > .builder-rating-line > .hotness-indicator {
+  grid-column: 2;
+  grid-row: 2;
+  align-self: center;
+}
+.setlist-view-item .builder-item-duration {
+  grid-column: 3;
+  grid-row: 2;
+  font-size: 12px;
+  font-weight: 800;
+}
+.setlist-view-item .builder-item-duration svg { width: 15px; height: 15px; }
+.setlist-own-rating-summary {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 18px;
+  padding: 13px 15px;
+  border: 1px solid #ead9a4;
+  border-radius: 14px;
+  background: #fffaf0;
+}
+.setlist-own-rating-summary > div:first-child { display: inline-flex; align-items: center; gap: 6px; font-weight: 800; }
+.setlist-own-rating-summary > div:first-child svg { width: 16px; height: 16px; }
+.setlist-own-rating-actions { display: flex; gap: 5px; margin-left: auto; }
+.setlist-own-rating-actions button { display: inline-flex; align-items: center; gap: 4px; border: 0; border-radius: 8px; padding: 6px 8px; color: var(--muted); background: transparent; font-size: 11px; font-weight: 750; cursor: pointer; }
+.setlist-own-rating-actions button:hover { color: var(--purple); background: var(--purple-soft); }
+.setlist-own-rating-actions button:last-child:hover { color: var(--red); background: var(--red-soft); }
+.setlist-own-rating-actions svg { width: 13px; height: 13px; }
+.setlist-rating-form-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 14px; }
+.setlist-rating-form-actions .primary-button { width: auto; }
+
+@media (max-width: 760px) {
+  .setlist-view-item .builder-item-actions { grid-template-columns: auto auto minmax(0, 1fr); }
+  .setlist-view-item .builder-item-actions > .builder-rating-line > .piece-rating-badges { grid-column: 1/-1; }
+  .setlist-view-item .builder-item-actions > .builder-rating-line > .piece-comments-toggle { grid-column: 1; }
+  .setlist-view-item .builder-item-actions > .builder-rating-line > .hotness-indicator { grid-column: 2; }
+  .setlist-view-item .builder-item-duration { grid-column: 3; justify-self: end; }
+  .setlist-own-rating-actions { flex-basis: 100%; margin-left: 0; }
+}
 .builder-item.active-preview { background: #fff4ee; }
 
 /* Kompakte Häufigkeit und Setlist-Bewertungen */
