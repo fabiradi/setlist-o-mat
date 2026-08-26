@@ -20,6 +20,371 @@
   --shadow: 0 18px 55px rgba(48, 37, 80, 0.1);
 }
 
+/* Phasen-Dashboard und Setlist-Vergleich */
+.dashboard-group-progress .section-title > strong {
+  color: var(--purple);
+  font-size: 24px;
+}
+.dashboard-rating-progress {
+  height: 9px;
+  margin: 18px 0 12px;
+  overflow: hidden;
+  border-radius: 99px;
+  background: #e8e3db;
+}
+.dashboard-rating-progress span {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: linear-gradient(90deg, var(--purple), var(--coral));
+}
+.dashboard-compare-card > p {
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.55;
+}
+.dashboard-compare-card button:disabled {
+  cursor: default;
+  opacity: 0.45;
+}
+.comparison-tray {
+  position: sticky;
+  z-index: 12;
+  top: 10px;
+  display: grid;
+  grid-template-columns: minmax(180px, auto) minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 14px;
+  margin: 0 0 18px;
+  padding: 13px 15px;
+  border: 1px solid #cdbff4;
+  border-radius: 15px;
+  background: rgba(255, 253, 250, 0.96);
+  box-shadow: 0 12px 32px rgba(48, 37, 80, 0.12);
+  backdrop-filter: blur(12px);
+}
+.comparison-tray > div:first-child strong,
+.comparison-tray > div:first-child span {
+  display: block;
+}
+.comparison-tray > div:first-child strong {
+  font-size: 13px;
+}
+.comparison-tray > div:first-child span {
+  margin-top: 3px;
+  color: var(--muted);
+  font-size: 9px;
+}
+.comparison-tray-selection {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+}
+.comparison-tray-selection button {
+  max-width: 220px;
+  min-height: 29px;
+  border: 0;
+  border-radius: 99px;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 4px 9px;
+  overflow: hidden;
+  background: var(--purple-soft);
+  color: var(--purple);
+  font-size: 9px;
+  font-weight: 750;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  cursor: pointer;
+}
+.comparison-tray-selection svg {
+  width: 11px;
+  height: 11px;
+  flex: none;
+}
+.comparison-tray .primary-button:disabled {
+  cursor: default;
+  opacity: 0.45;
+}
+.setlist-card.comparison-selected {
+  border-color: var(--purple);
+  box-shadow:
+    0 0 0 2px var(--purple-soft),
+    var(--shadow);
+}
+.compare-select-button {
+  width: 30px;
+  height: 30px;
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  display: grid;
+  place-items: center;
+  flex: none;
+  background: #fff;
+  color: var(--muted);
+  cursor: pointer;
+}
+.compare-select-button[aria-pressed="true"] {
+  border-color: var(--purple);
+  background: var(--purple);
+  color: #fff;
+}
+.compare-select-button:disabled {
+  cursor: default;
+  opacity: 0.3;
+}
+.compare-select-button svg {
+  width: 15px;
+  height: 15px;
+}
+.comparison-backdrop {
+  padding: 18px;
+}
+.comparison-dialog {
+  width: min(1180px, 100%);
+  max-height: calc(100dvh - 36px);
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  padding: 24px 26px 18px;
+}
+.comparison-dialog > h2 {
+  margin: 7px 45px 3px 0;
+  font-size: 27px;
+  letter-spacing: -0.035em;
+}
+.comparison-scroll {
+  min-height: 0;
+  margin-top: 18px;
+  overflow: auto;
+  border: 1px solid var(--line);
+  border-radius: 15px;
+  background: #fff;
+}
+.comparison-grid {
+  display: grid;
+  grid-template-columns: minmax(160px, 0.8fr) repeat(
+      var(--comparison-count),
+      minmax(210px, 1fr)
+    );
+}
+.comparison-grid > * {
+  min-width: 0;
+  border-right: 1px solid #e9e4dc;
+  border-bottom: 1px solid #e9e4dc;
+}
+.comparison-corner,
+.comparison-label {
+  position: sticky;
+  left: 0;
+  z-index: 3;
+  padding: 12px 13px;
+  background: #f3efe9;
+  color: var(--muted);
+  font-size: 9px;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+.comparison-corner {
+  top: 0;
+  z-index: 5;
+}
+.comparison-heading {
+  position: sticky;
+  top: 0;
+  z-index: 4;
+  min-height: 94px;
+  padding: 12px 14px;
+  background: var(--ink);
+  color: #fff;
+}
+.comparison-heading span,
+.comparison-heading strong {
+  display: block;
+}
+.comparison-heading span {
+  color: #bdb5ca;
+  font-size: 9px;
+}
+.comparison-heading strong {
+  margin-top: 4px;
+  font-size: 15px;
+  line-height: 1.25;
+}
+.comparison-heading button {
+  border: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  margin-top: 8px;
+  padding: 0;
+  background: transparent;
+  color: #d8cbff;
+  font-size: 9px;
+  font-weight: 750;
+  cursor: pointer;
+}
+.comparison-heading button svg {
+  width: 11px;
+}
+.comparison-value {
+  min-height: 55px;
+  padding: 11px 14px;
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  flex-wrap: wrap;
+  background: #fff;
+}
+.comparison-value strong,
+.comparison-value small {
+  display: block;
+}
+.comparison-value small {
+  color: var(--muted);
+  font-size: 9px;
+}
+.comparison-rating .display-stars {
+  color: var(--purple) !important;
+}
+.comparison-own-rating .display-stars {
+  color: var(--yellow) !important;
+}
+.comparison-progress {
+  width: 100%;
+  height: 5px;
+  overflow: hidden;
+  border-radius: 99px;
+  background: #ebe7df;
+}
+.comparison-progress i {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: var(--purple);
+}
+.comparison-complete {
+  display: inline-flex !important;
+  align-items: center;
+  gap: 3px;
+  color: var(--green) !important;
+  font-weight: 750;
+}
+.comparison-complete svg {
+  width: 12px;
+  height: 12px;
+}
+.comparison-time {
+  display: block;
+}
+.comparison-time .time-signal {
+  margin: 0;
+}
+.comparison-genres {
+  align-content: center;
+}
+.comparison-piece-section h3 {
+  margin: 0;
+  padding: 18px 14px 11px;
+  background: #fff;
+  font-size: 15px;
+}
+.comparison-piece-column-head {
+  padding: 9px 12px;
+  background: #f3efe9;
+  color: var(--muted);
+  font-size: 9px;
+  font-weight: 750;
+}
+.comparison-piece-name {
+  position: sticky;
+  left: 0;
+  z-index: 2;
+  padding: 10px 13px;
+}
+.comparison-piece-name strong,
+.comparison-piece-name small {
+  display: block;
+}
+.comparison-piece-name strong {
+  font-size: 11px;
+}
+.comparison-piece-name small {
+  margin-top: 3px;
+  color: var(--muted);
+  font-size: 8px;
+}
+.comparison-piece-name.common,
+.comparison-piece-position.common {
+  background: #e8f4ee;
+}
+.comparison-piece-name.partial,
+.comparison-piece-position.partial {
+  background: #fff7df;
+}
+.comparison-piece-name.exclusive,
+.comparison-piece-position.exclusive {
+  background: #fff0e9;
+}
+.comparison-piece-position {
+  min-height: 50px;
+  display: grid;
+  place-items: center;
+}
+.comparison-piece-position strong {
+  width: 28px;
+  height: 28px;
+  border-radius: 9px;
+  display: grid;
+  place-items: center;
+  background: rgba(255, 255, 255, 0.78);
+  font-size: 10px;
+}
+.comparison-piece-position.missing {
+  background: #faf8f5;
+  color: #bbb4bd;
+}
+.comparison-actions {
+  flex: none;
+  margin-top: 14px;
+  padding-top: 12px;
+}
+
+@media (max-width: 760px) {
+  .comparison-tray {
+    top: 6px;
+    grid-template-columns: 1fr;
+    gap: 9px;
+  }
+  .comparison-tray .primary-button {
+    width: 100%;
+  }
+  .comparison-backdrop {
+    padding: 0;
+  }
+  .comparison-dialog {
+    width: 100%;
+    height: 100dvh;
+    max-height: none;
+    border-radius: 0;
+    padding: 18px 14px calc(14px + env(safe-area-inset-bottom));
+  }
+  .comparison-dialog > h2 {
+    font-size: 22px;
+  }
+  .comparison-grid {
+    grid-template-columns: minmax(125px, 0.65fr) repeat(
+        var(--comparison-count),
+        minmax(185px, 1fr)
+      );
+  }
+  .comparison-heading {
+    min-height: 90px;
+  }
+}
+
 /* Konsens- und Bewertungsansichten */
 .piece-row.rated {
   background: var(--paper);
@@ -118,6 +483,13 @@
   font-size: 12px;
   font-weight: 600;
 }
+.setlist-rating-row small em {
+  margin-left: 5px;
+  color: var(--green);
+  font-size: 9px;
+  font-style: normal;
+  font-weight: 800;
+}
 .setlist-rating-row.own {
   opacity: 0.82;
 }
@@ -134,6 +506,9 @@
   height: 100%;
   border-radius: inherit;
   background: var(--coral);
+}
+.setlist-rating-progress.complete i {
+  background: var(--green);
 }
 .setlist-card-rating .display-stars i {
   width: 15px;
@@ -4517,6 +4892,31 @@ small {
 }
 .builder-item.active-preview {
   background: var(--coral-soft) !important;
+}
+
+/* Muss nach den generischen Dialogregeln stehen. */
+.dialog-backdrop.comparison-backdrop {
+  padding: 18px;
+}
+.dialog.comparison-dialog {
+  width: min(1180px, 100%);
+  max-height: calc(100dvh - 36px);
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  padding: 24px 26px 18px;
+}
+@media (max-width: 760px) {
+  .dialog-backdrop.comparison-backdrop {
+    padding: 0;
+  }
+  .dialog.comparison-dialog {
+    width: 100%;
+    height: 100dvh;
+    max-height: none;
+    border-radius: 0;
+    padding: 18px 14px calc(14px + env(safe-area-inset-bottom));
+  }
 }
 
 /* Ruhiger, semantischer Kopf der Setlist-Card */

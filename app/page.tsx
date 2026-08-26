@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { Fragment, useEffect, useMemo, useRef, useState } from "react";
 import type { CSSProperties } from "react";
 import type { Session, SupabaseClient } from "@supabase/supabase-js";
 import {
@@ -802,6 +802,9 @@ export default function Home() {
   const [setlistSort, setSetlistSort] = useState<SetlistSort>("rating-desc");
   const [onlyUnratedSetlists, setOnlyUnratedSetlists] = useState(false);
   const [showConsensus, setShowConsensus] = useState(true);
+  const [compareMode, setCompareMode] = useState(false);
+  const [comparisonIds, setComparisonIds] = useState<string[]>([]);
+  const [comparisonOpen, setComparisonOpen] = useState(false);
   const [builderId, setBuilderId] = useState<number | string | null>(null);
   const [remotePieceIds, setRemotePieceIds] = useState<Record<number, string>>(
     {},
@@ -1630,6 +1633,26 @@ export default function Home() {
       setlistsHash(setlistFilter, setlistSort, onlyUnratedSetlists),
       true,
     );
+  };
+  const startSetlistComparison = () => {
+    setView("setlists");
+    setActivePieceId(null);
+    setActiveSetlistId(null);
+    setBuilderId(null);
+    setOnlyUnratedSetlists(false);
+    setCompareMode(true);
+    writeAppHash(setlistsHash(setlistFilter, setlistSort, false));
+  };
+  const toggleComparisonSetlist = (setlistId: number | string) => {
+    const key = String(setlistId);
+    setComparisonIds((current) => {
+      if (current.includes(key)) return current.filter((id) => id !== key);
+      if (current.length >= 3) {
+        flash("Du kannst maximal drei Setlists vergleichen");
+        return current;
+      }
+      return [...current, key];
+    });
   };
   const showBuilder = (setlistId: number | string) => {
     setView("setlists");
@@ -2471,6 +2494,27 @@ export default function Home() {
   ).length;
   const ownPublishedCount = publishedSetlists.filter(isOwn).length;
   const ratingTarget = supabase ? members.length : 6;
+  const ownRatedPublishedCount = publishedSetlists.filter(
+    (item) => setlistRatings[String(item.id)],
+  ).length;
+  const groupSetlistRatingCount = publishedSetlists.reduce(
+    (sum, item) => sum + item.ratingCount,
+    0,
+  );
+  const groupSetlistRatingTarget = publishedSetlists.length * ratingTarget;
+  const groupSetlistProgress = groupSetlistRatingTarget
+    ? Math.min(
+        100,
+        Math.round((groupSetlistRatingCount / groupSetlistRatingTarget) * 100),
+      )
+    : 0;
+  const ownSetlistProgress = publishedSetlists.length
+    ? Math.round((ownRatedPublishedCount / publishedSetlists.length) * 100)
+    : 0;
+  const comparisonSetlists = comparisonIds.flatMap((id) => {
+    const item = publishedSetlists.find((setlist) => String(setlist.id) === id);
+    return item ? [item] : [];
+  });
   const visibleSetlists = setlists
     .filter(
       (item) =>
@@ -2511,6 +2555,19 @@ export default function Home() {
   const finalist =
     setlists.find((item) => item.state === "final") ??
     setlists.find((item) => item.state === "finalist");
+  const finalistCount = setlists.filter(
+    (item) => item.state === "finalist" || item.state === "final",
+  ).length;
+  const dashboardStage =
+    completed < catalogue.length
+      ? "pieces"
+      : finalistCount > 0
+        ? "finalists"
+        : publishedSetlists.length === 0
+          ? "build"
+          : ownRatedPublishedCount < publishedSetlists.length
+            ? "setlist-ratings"
+            : "compare";
   const onlineMembers = members.filter((member) =>
     onlineMemberIds.includes(member.id),
   );
@@ -2672,45 +2729,129 @@ export default function Home() {
                 <span className="eyebrow">
                   <Sparkles /> Jahreskonzert 2027
                 </span>
-                <h1>Hallo {friendlyName}, was klingt gut?</h1>
+                <h1>
+                  {dashboardStage === "pieces"
+                    ? `Hallo ${friendlyName}, was klingt gut?`
+                    : dashboardStage === "setlist-ratings"
+                      ? "Jetzt sind die Setlists dran."
+                      : dashboardStage === "compare"
+                        ? "Zeit, die Vorschläge zu vergleichen."
+                        : dashboardStage === "finalists"
+                          ? "Die Finalrunde läuft."
+                          : "Baue den ersten Programmvorschlag."}
+                </h1>
                 <p>
-                  Noch {catalogue.length - completed} Stücke warten auf deine
-                  Ohren. Danach darfst du bei den anderen spicken.
+                  {dashboardStage === "pieces"
+                    ? `Noch ${catalogue.length - completed} Stücke warten auf deine Ohren.`
+                    : dashboardStage === "setlist-ratings"
+                      ? `Noch ${publishedSetlists.length - ownRatedPublishedCount} veröffentlichte Setlists warten auf deine Bewertung.`
+                      : dashboardStage === "compare"
+                        ? "Deine Bewertungen sind vollständig. Jetzt werden Gemeinsamkeiten und Unterschiede sichtbar."
+                        : dashboardStage === "finalists"
+                          ? `${finalistCount} ${finalistCount === 1 ? "Vorschlag ist" : "Vorschläge sind"} für die engere Auswahl markiert.`
+                          : "Die Stückbewertungen sind abgeschlossen – jetzt fehlen Setlist-Vorschläge."}
                 </p>
               </div>
               <button
                 className="primary-button"
-                onClick={() => navigateToView("pieces")}
+                onClick={() => {
+                  if (dashboardStage === "pieces") {
+                    setOnlyOpen(true);
+                    setView("pieces");
+                    writeAppHash(piecesHash(search, genre, true, pieceSort));
+                  } else if (dashboardStage === "build") createSetlist();
+                  else if (dashboardStage === "setlist-ratings") {
+                    setOnlyUnratedSetlists(true);
+                    setView("setlists");
+                    writeAppHash(
+                      setlistsHash(setlistFilter, setlistSort, true),
+                    );
+                  } else startSetlistComparison();
+                }}
               >
-                <Headphones /> Weiter bewerten
+                {dashboardStage === "pieces" ? (
+                  <>
+                    <Headphones /> Weiter bewerten
+                  </>
+                ) : dashboardStage === "build" ? (
+                  <>
+                    <Plus /> Neue Setlist
+                  </>
+                ) : dashboardStage === "setlist-ratings" ? (
+                  <>
+                    <Star /> Offene Setlists bewerten
+                  </>
+                ) : (
+                  <>
+                    <BarChart3 /> Setlists vergleichen
+                  </>
+                )}
               </button>
             </div>
             <div className="dashboard-grid">
               <article className="hero-card progress-card">
                 <div className="card-topline">
-                  <span>Dein Bewertungsfortschritt</span>
-                  <strong>{progress}%</strong>
+                  <span>
+                    {dashboardStage === "pieces"
+                      ? "Deine Stückbewertungen"
+                      : "Deine Setlist-Bewertungen"}
+                  </span>
+                  <strong>
+                    {dashboardStage === "pieces"
+                      ? progress
+                      : ownSetlistProgress}
+                    %
+                  </strong>
                 </div>
                 <div className="big-progress">
-                  <span style={{ width: `${progress}%` }} />
+                  <span
+                    style={{
+                      width: `${dashboardStage === "pieces" ? progress : ownSetlistProgress}%`,
+                    }}
+                  />
                 </div>
                 <div className="progress-copy">
                   <strong>
-                    {completed} von {catalogue.length}
+                    {dashboardStage === "pieces"
+                      ? `${completed} von ${catalogue.length}`
+                      : `${ownRatedPublishedCount} von ${publishedSetlists.length}`}
                   </strong>
                   <span>
-                    Noch {catalogue.length - completed} Hörproben – eine gute
-                    Playlistlänge.
+                    {dashboardStage === "pieces"
+                      ? `Noch ${catalogue.length - completed} Hörproben.`
+                      : publishedSetlists.length === 0
+                        ? "Noch keine Setlist veröffentlicht."
+                        : ownRatedPublishedCount === publishedSetlists.length
+                          ? "Vollständig bewertet – bereit zum Vergleichen."
+                          : `Noch ${publishedSetlists.length - ownRatedPublishedCount} Setlists offen.`}
                   </span>
                 </div>
                 <button
                   onClick={() => {
-                    setOnlyOpen(true);
-                    setView("pieces");
-                    writeAppHash(piecesHash(search, genre, true, pieceSort));
+                    if (dashboardStage === "pieces") {
+                      setOnlyOpen(true);
+                      setView("pieces");
+                      writeAppHash(piecesHash(search, genre, true, pieceSort));
+                    } else if (publishedSetlists.length === 0) createSetlist();
+                    else if (
+                      ownRatedPublishedCount < publishedSetlists.length
+                    ) {
+                      setOnlyUnratedSetlists(true);
+                      setView("setlists");
+                      writeAppHash(
+                        setlistsHash(setlistFilter, setlistSort, true),
+                      );
+                    } else startSetlistComparison();
                   }}
                 >
-                  Offene Stücke ansehen <ChevronRight />
+                  {dashboardStage === "pieces"
+                    ? "Offene Stücke ansehen"
+                    : publishedSetlists.length === 0
+                      ? "Setlist erstellen"
+                      : ownRatedPublishedCount < publishedSetlists.length
+                        ? "Offene Setlists ansehen"
+                        : "Setlists vergleichen"}{" "}
+                  <ChevronRight />
                 </button>
                 <div className="vinyl-art" aria-hidden="true">
                   <span />
@@ -2718,14 +2859,18 @@ export default function Home() {
                 </div>
               </article>
               <article className="metric-card">
-                <div className="metric-icon purple">
-                  <Users />
+                <div className="metric-icon green">
+                  <BadgeCheck />
                 </div>
                 <div>
-                  <span>Teilnehmer</span>
-                  <strong>{supabase ? members.length : 6}</strong>
+                  <span>Stückbewertungen</span>
+                  <strong>
+                    {completed}/{catalogue.length}
+                  </strong>
                   <small>
-                    {supabase ? "im aktuellen Projekt" : "5 zuletzt aktiv"}
+                    {completed === catalogue.length
+                      ? "abgeschlossen"
+                      : "noch in Arbeit"}
                   </small>
                 </div>
               </article>
@@ -2736,15 +2881,7 @@ export default function Home() {
                 <div>
                   <span>Veröffentlichte Setlists</span>
                   <strong>{publishedSetlists.length}</strong>
-                  <small>
-                    {
-                      setlists.filter(
-                        (item) =>
-                          item.state === "finalist" || item.state === "final",
-                      ).length
-                    }{" "}
-                    in der Finalrunde
-                  </small>
+                  <small>{finalistCount} in der Finalrunde</small>
                 </div>
               </article>
               {finalist ? (
@@ -2771,7 +2908,7 @@ export default function Home() {
                       <Star fill="currentColor" />{" "}
                       {finalist.rating.toFixed(1).replace(".", ",")}{" "}
                       <small>
-                        ({finalist.ratingCount}/{Math.max(members.length, 6)})
+                        ({finalist.ratingCount}/{ratingTarget || "–"})
                       </small>
                     </span>
                     <span>
@@ -2782,31 +2919,38 @@ export default function Home() {
                     className="secondary-button"
                     onClick={() => openSetlist(finalist.id)}
                   >
-                    Jetzt bewerten <ChevronRight />
+                    Setlist öffnen <ChevronRight />
                   </button>
                 </article>
               ) : (
-                <article className="content-card finalist-card">
+                <article className="content-card finalist-card dashboard-group-progress">
                   <div className="section-title">
                     <div>
                       <span className="eyebrow">
-                        <Trophy /> Finalrunde
+                        <Users /> Gruppenfortschritt
                       </span>
-                      <h2>Noch alles offen</h2>
+                      <h2>
+                        {groupSetlistRatingCount} von{" "}
+                        {groupSetlistRatingTarget || "–"} Bewertungen
+                      </h2>
                     </div>
+                    <strong>{groupSetlistProgress}%</strong>
+                  </div>
+                  <div className="dashboard-rating-progress">
+                    <span style={{ width: `${groupSetlistProgress}%` }} />
                   </div>
                   <p className="muted">
-                    Sobald eine Setlist markiert ist, erscheint sie hier.
+                    Alle aktiven Mitglieder × alle veröffentlichten Setlists.
                   </p>
                   <button
                     className="secondary-button"
                     onClick={() => navigateToView("setlists")}
                   >
-                    Setlists ansehen <ChevronRight />
+                    Bewertungsstand ansehen <ChevronRight />
                   </button>
                 </article>
               )}
-              {nextPiece && (
+              {dashboardStage === "pieces" && nextPiece ? (
                 <article className="content-card next-up-card">
                   <div className="section-title">
                     <div>
@@ -2831,6 +2975,28 @@ export default function Home() {
                     onClick={() => openPiece(nextPiece.id)}
                   >
                     <Play fill="currentColor" /> Hörprobe starten
+                  </button>
+                </article>
+              ) : (
+                <article className="content-card next-up-card dashboard-compare-card">
+                  <div className="section-title">
+                    <div>
+                      <span className="eyebrow">
+                        <BarChart3 /> Vergleich
+                      </span>
+                      <h2>Vorschläge gegenüberstellen</h2>
+                    </div>
+                  </div>
+                  <p>
+                    Zwei oder drei Setlists nach Stücken, Reihenfolge, Dauer und
+                    Bewertungen vergleichen.
+                  </p>
+                  <button
+                    className="secondary-button"
+                    disabled={publishedSetlists.length < 2}
+                    onClick={startSetlistComparison}
+                  >
+                    Vergleich starten <ChevronRight />
                   </button>
                 </article>
               )}
@@ -3174,7 +3340,46 @@ export default function Home() {
                 <Star fill={onlyUnratedSetlists ? "currentColor" : "none"} />
                 Noch nicht bewertet
               </button>
+              <button
+                className={`consensus-toggle ${compareMode ? "active" : ""}`}
+                aria-pressed={compareMode}
+                onClick={() => {
+                  setCompareMode((current) => !current);
+                  if (compareMode) setComparisonIds([]);
+                }}
+              >
+                <BarChart3 /> Setlists vergleichen
+              </button>
             </div>
+            {compareMode && (
+              <section
+                className="comparison-tray"
+                aria-label="Vergleichsauswahl"
+              >
+                <div>
+                  <strong>{comparisonIds.length}/3 ausgewählt</strong>
+                  <span>Wähle zwei oder drei veröffentlichte Setlists.</span>
+                </div>
+                <div className="comparison-tray-selection">
+                  {comparisonSetlists.map((item) => (
+                    <button
+                      key={item.id}
+                      onClick={() => toggleComparisonSetlist(item.id)}
+                      title={`${item.name} aus Vergleich entfernen`}
+                    >
+                      {item.name} <X />
+                    </button>
+                  ))}
+                </div>
+                <button
+                  className="primary-button"
+                  disabled={comparisonSetlists.length < 2}
+                  onClick={() => setComparisonOpen(true)}
+                >
+                  <BarChart3 /> Vergleich öffnen
+                </button>
+              </section>
+            )}
             {visibleSetlists.length ? (
               <div className="setlist-grid">
                 {visibleSetlists.map((setlist) => {
@@ -3188,10 +3393,30 @@ export default function Home() {
                   );
                   return (
                     <article
-                      className={`setlist-card state-${setlist.state}`}
+                      className={`setlist-card state-${setlist.state} ${comparisonIds.includes(String(setlist.id)) ? "comparison-selected" : ""}`}
                       key={setlist.id}
                     >
                       <div className="setlist-card-title-row">
+                        {compareMode && setlist.state !== "draft" && (
+                          <button
+                            className="compare-select-button"
+                            aria-pressed={comparisonIds.includes(
+                              String(setlist.id),
+                            )}
+                            aria-label={`${setlist.name} ${comparisonIds.includes(String(setlist.id)) ? "aus Vergleich entfernen" : "zum Vergleich hinzufügen"}`}
+                            disabled={
+                              comparisonIds.length >= 3 &&
+                              !comparisonIds.includes(String(setlist.id))
+                            }
+                            onClick={() => toggleComparisonSetlist(setlist.id)}
+                          >
+                            {comparisonIds.includes(String(setlist.id)) ? (
+                              <Check />
+                            ) : (
+                              <Plus />
+                            )}
+                          </button>
+                        )}
                         <span
                           className="setlist-card-icon"
                           title={
@@ -3359,6 +3584,10 @@ export default function Home() {
                               </strong>
                               <small>
                                 ({setlist.ratingCount}/{ratingTarget || "–"})
+                                {ratingTarget > 0 &&
+                                  setlist.ratingCount >= ratingTarget && (
+                                    <em>vollständig</em>
+                                  )}
                               </small>
                             </span>
                             <span className="setlist-rating-row own">
@@ -3376,7 +3605,9 @@ export default function Home() {
                                 <small>noch nicht bewertet</small>
                               )}
                             </span>
-                            <span className="setlist-rating-progress">
+                            <span
+                              className={`setlist-rating-progress ${ratingTarget > 0 && setlist.ratingCount >= ratingTarget ? "complete" : ""}`}
+                            >
                               <i
                                 style={{
                                   width: `${ratingTarget ? Math.min(100, (setlist.ratingCount / ratingTarget) * 100) : 0}%`,
@@ -3790,6 +4021,20 @@ export default function Home() {
           onSave={(rating) => {
             void saveSetlistRating(activeSetlist, rating);
             closeSetlist();
+          }}
+        />
+      )}
+      {comparisonOpen && comparisonSetlists.length >= 2 && (
+        <SetlistComparisonDialog
+          catalogue={catalogue}
+          setlists={comparisonSetlists}
+          publishedSetlists={publishedSetlists}
+          ownRatings={setlistRatings}
+          ratingTarget={ratingTarget}
+          onClose={() => setComparisonOpen(false)}
+          onOpenSetlist={(id) => {
+            setComparisonOpen(false);
+            openSetlist(id);
           }}
         />
       )}
@@ -5915,6 +6160,250 @@ function SetlistDialog({
               </button>
             )}
           </aside>
+        </div>
+      </section>
+    </div>
+  );
+}
+
+function SetlistComparisonDialog({
+  catalogue,
+  setlists,
+  publishedSetlists,
+  ownRatings,
+  ratingTarget,
+  onClose,
+  onOpenSetlist,
+}: {
+  catalogue: Piece[];
+  setlists: Setlist[];
+  publishedSetlists: Setlist[];
+  ownRatings: Record<string, SetlistRating>;
+  ratingTarget: number;
+  onClose: () => void;
+  onOpenSetlist: (id: number | string) => void;
+}) {
+  const pieceIds = [
+    ...new Set(setlists.flatMap((setlist) => setlist.pieceIds)),
+  ];
+  const comparisonPieces = pieceIds.flatMap((id) => {
+    const piece = catalogue.find((item) => item.id === id);
+    return piece ? [piece] : [];
+  });
+  const gridStyle = {
+    "--comparison-count": setlists.length,
+    minWidth: setlists.length === 2 ? "620px" : "840px",
+  } as CSSProperties;
+  return (
+    <div
+      className="dialog-backdrop comparison-backdrop"
+      onMouseDown={(event) => event.target === event.currentTarget && onClose()}
+    >
+      <section
+        className="dialog comparison-dialog"
+        role="dialog"
+        aria-modal="true"
+        aria-label="Setlists vergleichen"
+      >
+        <button className="dialog-close" onClick={onClose}>
+          <X />
+        </button>
+        <div className="dialog-kicker">
+          <BarChart3 /> Setlist-Vergleich
+        </div>
+        <h2>{setlists.length} Vorschläge im direkten Vergleich</h2>
+        <p className="dialog-subtitle">
+          Gemeinsamkeiten, Unterschiede und Bewertungsstand auf einen Blick.
+        </p>
+        <div className="comparison-scroll">
+          <div className="comparison-grid" style={gridStyle}>
+            <div className="comparison-corner">Kriterium</div>
+            {setlists.map((setlist) => (
+              <div className="comparison-heading" key={setlist.id}>
+                <span>{setlist.owner}</span>
+                <strong>{setlist.name}</strong>
+                <button onClick={() => onOpenSetlist(setlist.id)}>
+                  Öffnen <ChevronRight />
+                </button>
+              </div>
+            ))}
+
+            <div className="comparison-label">Gruppenbewertung</div>
+            {setlists.map((setlist) => (
+              <div
+                className="comparison-value comparison-rating"
+                key={setlist.id}
+              >
+                <DisplayStars
+                  value={setlist.ratingCount ? setlist.rating : 0}
+                />
+                <strong>
+                  {setlist.ratingCount
+                    ? setlist.rating.toFixed(1).replace(".", ",")
+                    : "–"}
+                </strong>
+                <small>({setlist.ratingCount})</small>
+              </div>
+            ))}
+
+            <div className="comparison-label">Bewertungsstand</div>
+            {setlists.map((setlist) => (
+              <div className="comparison-value" key={setlist.id}>
+                <strong>
+                  {setlist.ratingCount}/{ratingTarget || "–"}
+                </strong>
+                {ratingTarget > 0 && setlist.ratingCount >= ratingTarget && (
+                  <small className="comparison-complete">
+                    <Check /> vollständig
+                  </small>
+                )}
+                <span className="comparison-progress">
+                  <i
+                    style={{
+                      width: `${ratingTarget ? Math.min(100, (setlist.ratingCount / ratingTarget) * 100) : 0}%`,
+                    }}
+                  />
+                </span>
+              </div>
+            ))}
+
+            <div className="comparison-label">Deine Bewertung</div>
+            {setlists.map((setlist) => {
+              const own = ownRatings[String(setlist.id)];
+              return (
+                <div
+                  className="comparison-value comparison-own-rating"
+                  key={setlist.id}
+                >
+                  {own ? (
+                    <>
+                      <DisplayStars value={own.stars} />
+                      <strong>{own.stars}</strong>
+                    </>
+                  ) : (
+                    <small>Noch nicht bewertet</small>
+                  )}
+                </div>
+              );
+            })}
+
+            <div className="comparison-label">Dauer</div>
+            {setlists.map((setlist) => (
+              <div
+                className="comparison-value comparison-time"
+                key={setlist.id}
+              >
+                <TimeSignal
+                  duration={getMetrics(setlist.pieceIds, catalogue).duration}
+                  compact
+                />
+              </div>
+            ))}
+
+            <div className="comparison-label">Übereinstimmung</div>
+            {setlists.map((setlist) => {
+              const value = getSetlistAgreement(setlist, publishedSetlists);
+              return (
+                <div className="comparison-value" key={setlist.id}>
+                  <strong>{value === null ? "–" : `${value}%`}</strong>
+                  <small>mit allen Vorschlägen</small>
+                </div>
+              );
+            })}
+
+            <div className="comparison-label">Genre-Mix</div>
+            {setlists.map((setlist) => (
+              <div
+                className="comparison-value comparison-genres"
+                key={setlist.id}
+              >
+                {getMetrics(setlist.pieceIds, catalogue).genres.map((genre) => (
+                  <span className="genre-chip" key={genre}>
+                    {genre}
+                  </span>
+                ))}
+              </div>
+            ))}
+
+            <div className="comparison-label">Soli · Kosten</div>
+            {setlists.map((setlist) => {
+              const metrics = getMetrics(setlist.pieceIds, catalogue);
+              const solos = metrics.selected.filter(
+                (piece) => piece.soloStatus === "available",
+              ).length;
+              return (
+                <div className="comparison-value" key={setlist.id}>
+                  <strong>{solos} Solo-Stücke</strong>
+                  <small>{formatMoney(metrics.cost)} noch zu kaufen</small>
+                </div>
+              );
+            })}
+
+            <div className="comparison-label">Kommentare</div>
+            {setlists.map((setlist) => (
+              <div className="comparison-value" key={setlist.id}>
+                <strong>{setlist.comments}</strong>
+                <small>von {setlist.ratingCount} Bewertungen</small>
+              </div>
+            ))}
+          </div>
+
+          <div className="comparison-piece-section">
+            <h3>Stücke und Reihenfolge</h3>
+            <div
+              className="comparison-grid comparison-piece-grid"
+              style={gridStyle}
+            >
+              <div className="comparison-corner">Stück</div>
+              {setlists.map((setlist) => (
+                <div className="comparison-piece-column-head" key={setlist.id}>
+                  {setlist.name}
+                </div>
+              ))}
+              {comparisonPieces.map((piece) => {
+                const positions = setlists.map((setlist) =>
+                  setlist.pieceIds.indexOf(piece.id),
+                );
+                const occurrence = positions.filter(
+                  (position) => position >= 0,
+                ).length;
+                const rowState =
+                  occurrence === setlists.length
+                    ? "common"
+                    : occurrence === 1
+                      ? "exclusive"
+                      : "partial";
+                const totalOccurrence = publishedSetlists.filter((setlist) =>
+                  setlist.pieceIds.includes(piece.id),
+                ).length;
+                return (
+                  <Fragment key={piece.id}>
+                    <div className={`comparison-piece-name ${rowState}`}>
+                      <strong>{piece.title}</strong>
+                      <small>{totalOccurrence}× insgesamt</small>
+                    </div>
+                    {positions.map((position, index) => (
+                      <div
+                        className={`comparison-piece-position ${position >= 0 ? rowState : "missing"}`}
+                        key={`${piece.id}-${setlists[index].id}`}
+                      >
+                        {position >= 0 ? (
+                          <strong>#{position + 1}</strong>
+                        ) : (
+                          <span>–</span>
+                        )}
+                      </div>
+                    ))}
+                  </Fragment>
+                );
+              })}
+            </div>
+          </div>
+        </div>
+        <div className="dialog-actions comparison-actions">
+          <button className="text-button" onClick={onClose}>
+            Schließen
+          </button>
         </div>
       </section>
     </div>
