@@ -859,6 +859,21 @@ svg {
   border-radius: 0 4px 4px 0;
   background: #f5dfda;
 }
+.time-boundary {
+  position: absolute;
+  z-index: 2;
+  top: -3px;
+  bottom: -3px;
+  width: 1px;
+  background: #78716a;
+  opacity: 0.72;
+}
+.time-boundary-min {
+  left: 62.5%;
+}
+.time-boundary-max {
+  left: 75%;
+}
 .time-actual {
   position: absolute;
   z-index: 1;
@@ -5194,10 +5209,9 @@ small {
 }
 .piece-commercial-row {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(0, 0.65fr) minmax(
-      0,
-      0.85fr
-    ) minmax(175px, 1.25fr);
+  grid-template-columns:
+    minmax(0, 1fr) minmax(0, 0.65fr) minmax(0, 0.85fr)
+    minmax(175px, 1.25fr);
   gap: 13px;
 }
 .composer-genre-row label,
@@ -5436,6 +5450,42 @@ small {
 }
 .setlist-comments .discussion-comments {
   margin-top: 0;
+}
+.setlist-review-list {
+  gap: 0;
+}
+.setlist-review-list article {
+  padding: 11px 2px;
+  border-radius: 0;
+  border-bottom: 1px solid #ddd7e5;
+  background: transparent;
+}
+.setlist-review-list article:last-child {
+  border-bottom: 0;
+}
+.setlist-review-list header {
+  align-items: center;
+}
+.setlist-review-list .review-author {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--ink);
+}
+.setlist-review-list .review-author svg {
+  width: 14px;
+  height: 14px;
+  color: var(--muted);
+}
+.setlist-review-list article.group-member .display-stars {
+  color: #817b86 !important;
+}
+.setlist-review-list article.own .display-stars {
+  color: var(--yellow) !important;
+}
+.setlist-review-list .no-comment {
+  color: #99929d;
+  font-style: italic;
 }
 .setlist-view-actions {
   position: static;
@@ -6041,6 +6091,14 @@ small {
   justify-self: end;
   align-self: center;
 }
+.setlist-view-item
+  .builder-item-actions
+  > .builder-rating-line
+  > .hotness-indicator {
+  grid-column: 2;
+  grid-row: 2;
+  justify-self: end;
+}
 .builder-item-actions .builder-item-duration,
 .builder-item:not(.setlist-view-item) .builder-item-duration,
 .setlist-view-item .builder-item-duration {
@@ -6048,6 +6106,9 @@ small {
   grid-row: 2;
   margin: 0;
   white-space: nowrap;
+}
+.setlist-view-item .builder-item-duration {
+  grid-column: 3;
 }
 .builder-item:not(.setlist-view-item) .builder-item-controls {
   grid-column: 3;
@@ -6086,6 +6147,9 @@ small {
   .setlist-view-item .builder-item-duration {
     grid-column: 2;
     justify-self: start;
+  }
+  .setlist-view-item .builder-item-duration {
+    grid-column: 3;
   }
   .builder-item:not(.setlist-view-item) .builder-item-controls {
     grid-column: 4;

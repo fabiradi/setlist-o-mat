@@ -743,6 +743,8 @@ function TimeSignal({
         <span className="time-zone time-zone-short" aria-hidden="true" />
         <span className="time-zone time-zone-target" aria-hidden="true" />
         <span className="time-zone time-zone-long" aria-hidden="true" />
+        <b className="time-boundary time-boundary-min" aria-hidden="true" />
+        <b className="time-boundary time-boundary-max" aria-hidden="true" />
         <span
           className="time-actual"
           style={{ width: `${position}%` }}
@@ -3170,11 +3172,12 @@ export default function Home() {
                 {showConsensus ? <Eye /> : <EyeOff />} Häufigkeit
               </button>
               <button
-                className={`toggle ${onlyUnratedSetlists ? "active" : ""}`}
+                className={`consensus-toggle ${onlyUnratedSetlists ? "active" : ""}`}
                 aria-pressed={onlyUnratedSetlists}
                 onClick={() => setOnlyUnratedSetlists((value) => !value)}
               >
-                <span /> Noch nicht bewertet
+                <Star fill={onlyUnratedSetlists ? "currentColor" : "none"} />
+                Noch nicht bewertet
               </button>
             </div>
             {visibleSetlists.length ? (
@@ -3291,7 +3294,14 @@ export default function Home() {
                             <span className="setlist-preview-title">
                               {piece.title}
                               {piece.soloStatus === "available" && (
-                                <em className="setlist-preview-solo">
+                                <em
+                                  className="setlist-preview-solo"
+                                  title={
+                                    piece.solos?.trim()
+                                      ? `Solo vorhanden · ${piece.solos}`
+                                      : "Solo vorhanden · Besetzung noch offen"
+                                  }
+                                >
                                   <UserRound /> Solo
                                 </em>
                               )}
@@ -5554,7 +5564,6 @@ function SetlistDialog({
     number | null
   >(null);
   const metrics = getMetrics(setlist.pieceIds, catalogue);
-  const comments = setlist.reviews.filter((review) => review.comment);
   const isDraft = setlist.state === "draft";
   const soloCount = metrics.selected.filter(
     (piece) => piece.soloStatus === "available",
@@ -5741,31 +5750,45 @@ function SetlistDialog({
                   </strong>
                   <small>({setlist.ratingCount})</small>
                 </section>
-                <section className="setlist-comments" aria-label="Kommentare">
+                <section
+                  className="setlist-comments"
+                  aria-label="Einzelbewertungen"
+                >
                   <h3>
-                    Kommentare <span>{comments.length}</span>
+                    Einzelbewertungen <span>{setlist.reviews.length}</span>
                   </h3>
-                  {comments.length ? (
-                    <div className="discussion-comments">
-                      {comments.map((review) => (
-                        <article key={review.userId}>
-                          <header>
-                            <strong>
-                              {review.userId === currentUserId
-                                ? "Du"
-                                : review.author}
-                            </strong>
-                            <span>
-                              <Star fill="currentColor" /> {review.stars}/5
-                            </span>
-                          </header>
-                          <p>{review.comment}</p>
-                        </article>
-                      ))}
+                  {setlist.reviews.length ? (
+                    <div className="discussion-comments setlist-review-list">
+                      {setlist.reviews.map((review) => {
+                        const isOwnReview = review.userId === currentUserId;
+                        return (
+                          <article
+                            key={review.userId}
+                            className={isOwnReview ? "own" : "group-member"}
+                          >
+                            <header>
+                              <span className="review-author">
+                                <UserRound />
+                                <strong>
+                                  {isOwnReview ? "Du" : review.author}
+                                </strong>
+                              </span>
+                              <DisplayStars value={review.stars} />
+                            </header>
+                            <p
+                              className={
+                                review.comment ? undefined : "no-comment"
+                              }
+                            >
+                              {review.comment || "Kein Kommentar"}
+                            </p>
+                          </article>
+                        );
+                      })}
                     </div>
                   ) : (
                     <p className="discussion-empty">
-                      Noch keine Kommentare – du kannst die Diskussion eröffnen.
+                      Noch keine Einzelbewertungen vorhanden.
                     </p>
                   )}
                 </section>
