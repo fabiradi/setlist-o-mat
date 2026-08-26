@@ -3127,7 +3127,27 @@ export default function Home() {
                       key={setlist.id}
                     >
                       <div className="setlist-card-title-row">
-                        <span className="setlist-card-icon">
+                        <span
+                          className="setlist-card-icon"
+                          title={
+                            setlist.state === "draft"
+                              ? "Entwurf"
+                              : setlist.state === "finalist"
+                                ? "Finalrunde"
+                                : setlist.state === "final"
+                                  ? "Finale Setlist"
+                                  : "Veröffentlicht"
+                          }
+                          aria-label={
+                            setlist.state === "draft"
+                              ? "Entwurf"
+                              : setlist.state === "finalist"
+                                ? "Finalrunde"
+                                : setlist.state === "final"
+                                  ? "Finale Setlist"
+                                  : "Veröffentlicht"
+                          }
+                        >
                           {setlist.state === "draft" ? (
                             <Lock />
                           ) : setlist.state === "finalist" ||
@@ -3156,17 +3176,15 @@ export default function Home() {
                             setlist.name
                           )}
                         </h2>
-                        <span className={`status-pill ${setlist.state}`}>
-                          {setlist.state === "draft"
-                            ? isOwnSetlist
-                              ? "Mein Entwurf"
-                              : "Fremder Entwurf"
-                            : setlist.state === "finalist"
-                              ? "Finalrunde"
-                              : setlist.state === "final"
-                                ? "Finale Setlist"
-                                : "Veröffentlicht"}
-                        </span>
+                        {setlist.state !== "published" && (
+                          <span className={`status-pill ${setlist.state}`}>
+                            {setlist.state === "draft"
+                              ? "Entwurf"
+                              : setlist.state === "finalist"
+                                ? "Finalrunde"
+                                : "Finale Setlist"}
+                          </span>
+                        )}
                       </div>
                       <p className="setlist-card-subline">
                         <UserRound />

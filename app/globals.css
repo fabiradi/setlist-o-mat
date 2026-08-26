@@ -551,6 +551,20 @@ small {
   .setlist-card-title-row { grid-template-columns: auto minmax(0, 1fr); }
   .setlist-card-title-row .status-pill { grid-column: 2; justify-self: start; }
 }
+
+.state-published .setlist-card-icon {
+  color: #fff;
+  background: var(--green);
+}
+.setlist-card-rating .setlist-rating-row.group .display-stars svg {
+  color: var(--purple) !important;
+}
+.setlist-card-rating .setlist-rating-row.own .display-stars svg {
+  color: var(--yellow) !important;
+}
+.setlist-card-rating .setlist-rating-row > span:first-child svg {
+  color: var(--muted) !important;
+}
 .builder-item.active-preview { background: #fff4ee; }
 
 /* Kompakte Häufigkeit und Setlist-Bewertungen */
