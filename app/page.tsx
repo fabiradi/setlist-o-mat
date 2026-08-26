@@ -220,6 +220,7 @@ function loadYouTubeApi() {
 const pieces = rawPieces as Piece[];
 const TARGET_MIN = 25 * 60;
 const TARGET_MAX = 30 * 60;
+const TIME_SCALE_MAX = 40 * 60;
 const ACTIVE_PROJECT_ID = "20270000-0000-4000-8000-000000000001";
 const BUILD_ID = process.env.NEXT_PUBLIC_BUILD_ID ?? "development";
 const emptyPiece: Piece = {
@@ -720,10 +721,13 @@ function TimeSignal({
         : TARGET_MAX - duration;
   const label =
     state === "short"
-      ? `noch ${formatDuration(delta)}`
+      ? `${formatDuration(delta)} fehlen bis 25:00`
       : state === "long"
-        ? `${formatDuration(delta)} zu lang`
-        : `${formatDuration(delta)} Luft`;
+        ? `${formatDuration(delta)} über 30:00`
+        : delta > 0
+          ? `Zielbereich · ${formatDuration(delta)} bis 30:00`
+          : "Zielbereich · Obergrenze erreicht";
+  const position = Math.min((duration / TIME_SCALE_MAX) * 100, 100);
   return (
     <div
       className={`time-signal time-${state} ${compact ? "time-compact" : ""}`}
@@ -734,11 +738,25 @@ function TimeSignal({
       </div>
       <div
         className="time-track"
-        aria-label={`${formatDuration(duration)} von maximal 30 Minuten`}
+        aria-label={`${formatDuration(duration)}; Zielbereich 25 bis 30 Minuten`}
       >
+        <span className="time-zone time-zone-short" aria-hidden="true" />
+        <span className="time-zone time-zone-target" aria-hidden="true" />
+        <span className="time-zone time-zone-long" aria-hidden="true" />
         <span
-          style={{ width: `${Math.min((duration / TARGET_MAX) * 100, 100)}%` }}
+          className="time-actual"
+          style={{ width: `${position}%` }}
+          aria-hidden="true"
         />
+        <i
+          className="time-position"
+          style={{ left: `${position}%` }}
+          aria-hidden="true"
+        />
+      </div>
+      <div className="time-scale" aria-hidden="true">
+        <span className="time-scale-min">25</span>
+        <span className="time-scale-max">30 Min.</span>
       </div>
     </div>
   );
