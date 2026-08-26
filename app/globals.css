@@ -465,6 +465,40 @@ small {
   }
 }
 
+/* Häufigkeit als ruhige Heatmap statt als farbiges Badge */
+.hotness-indicator,
+.hotness-indicator.warm,
+.hotness-indicator.hot {
+  padding: 0;
+  border-radius: 0;
+  color: #6f6a72;
+  background: transparent;
+}
+.hotness-indicator svg { color: #a15f45; }
+.setlist-piece-preview > span.frequency-cool { background: #f7f5f1; }
+.setlist-piece-preview > span.frequency-warm { background: #fff7e7; }
+.setlist-piece-preview > span.frequency-hot { background: #ffebe4; }
+.setlist-piece-preview > span.frequency-cool,
+.setlist-piece-preview > span.frequency-warm,
+.setlist-piece-preview > span.frequency-hot {
+  padding-inline: 6px;
+  border-radius: 7px;
+}
+.builder-item.frequency-cool { background: #faf8f4; }
+.builder-item.frequency-warm { background: #fff9ed; }
+.builder-item.frequency-hot { background: #fff0eb; }
+
+.hotness-indicator,
+.hotness-indicator.warm,
+.hotness-indicator.hot { color: #b65038; background: transparent; }
+.hotness-indicator svg { color: currentColor; }
+.setlist-piece-preview > span.frequency-heat {
+  padding-inline: 6px;
+  border-radius: 7px;
+}
+.builder-item.active-preview { background: var(--coral-soft) !important; }
+.builder-item.active-preview { background: #fff4ee; }
+
 /* Kompakte Häufigkeit und Setlist-Bewertungen */
 .select-field select { flex: 1 1 auto; width: 100%; min-width: 0; align-self: stretch; cursor: pointer; }
 .select-field > svg:last-child { pointer-events: none; flex: 0 0 auto; }
@@ -958,3 +992,19 @@ small {
     margin-left: 6px;
   }
 }
+
+/* Proportionale Heatmap, bewusst nach allen Dialog-Overrides */
+.hotness-indicator,
+.hotness-indicator.warm,
+.hotness-indicator.hot {
+  padding: 0;
+  border-radius: 0;
+  color: #b65038;
+  background: transparent;
+}
+.hotness-indicator svg { color: currentColor; }
+.setlist-piece-preview > span.frequency-heat {
+  padding-inline: 6px;
+  border-radius: 7px;
+}
+.builder-item.active-preview { background: var(--coral-soft) !important; }

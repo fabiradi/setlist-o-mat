@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
+import type { CSSProperties } from "react";
 import type { Session, SupabaseClient } from "@supabase/supabase-js";
 import {
   Activity,
@@ -1747,17 +1748,15 @@ export default function Home() {
     const previousRating = ratings[pieceId];
     setRatings((current) => ({ ...current, [pieceId]: rating }));
     if (supabase && session && remotePieceIds[pieceId]) {
-      const { error } = await supabase
-        .from("piece_ratings")
-        .upsert(
-          {
-            piece_id: remotePieceIds[pieceId],
-            user_id: session.user.id,
-            ...rating,
-            updated_at: new Date().toISOString(),
-          },
-          { onConflict: "piece_id,user_id" },
-        );
+      const { error } = await supabase.from("piece_ratings").upsert(
+        {
+          piece_id: remotePieceIds[pieceId],
+          user_id: session.user.id,
+          ...rating,
+          updated_at: new Date().toISOString(),
+        },
+        { onConflict: "piece_id,user_id" },
+      );
       if (error) {
         setRatings((current) => {
           const next = { ...current };
@@ -3170,7 +3169,23 @@ export default function Home() {
                       <TimeSignal duration={metrics.duration} compact />
                       <div className="setlist-piece-preview">
                         {metrics.selected.map((piece, index) => (
-                          <span key={piece.id}>
+                          <span
+                            key={piece.id}
+                            className={
+                              showConsensus &&
+                              (pieceOccurrenceCounts[piece.id] ?? 0) >= 2
+                                ? "frequency-heat"
+                                : undefined
+                            }
+                            style={
+                              showConsensus
+                                ? getFrequencyStyle(
+                                    pieceOccurrenceCounts[piece.id] ?? 0,
+                                    publishedSetlists.length,
+                                  )
+                                : undefined
+                            }
+                          >
                             <b>{index + 1}</b>
                             <span className="setlist-preview-title">
                               {piece.title}
@@ -3228,7 +3243,9 @@ export default function Home() {
                             onClick={() => openSetlist(setlist.id)}
                           >
                             <span className="setlist-rating-row group">
-                              <span title="Gruppe" aria-label="Gruppe"><Users /></span>
+                              <span title="Gruppe" aria-label="Gruppe">
+                                <Users />
+                              </span>
                               <DisplayStars
                                 value={setlist.ratingCount ? setlist.rating : 0}
                               />
@@ -3242,7 +3259,9 @@ export default function Home() {
                               </small>
                             </span>
                             <span className="setlist-rating-row own">
-                              <span title="Du" aria-label="Du"><UserRound /></span>
+                              <span title="Du" aria-label="Du">
+                                <UserRound />
+                              </span>
                               {ownSetlistRating ? (
                                 <>
                                   <DisplayStars
@@ -4727,6 +4746,16 @@ function DisplayStars({ value }: { value: number }) {
   );
 }
 
+function getFrequencyStyle(
+  count: number,
+  total: number,
+): CSSProperties | undefined {
+  if (count < 2 || total < 1) return undefined;
+  const ratio = count / total;
+  const alpha = Math.min(0.18, 0.025 + ratio * 0.155);
+  return { backgroundColor: `rgba(240, 100, 73, ${alpha.toFixed(3)})` };
+}
+
 function HotnessIndicator({
   count,
   total,
@@ -4737,11 +4766,9 @@ function HotnessIndicator({
   compact?: boolean;
 }) {
   if (count < 2) return null;
-  const ratio = total ? count / total : 0;
-  const level = ratio >= 0.5 ? "hot" : ratio >= 0.25 ? "warm" : "cool";
   return (
     <span
-      className={`hotness-indicator ${level} ${compact ? "compact" : ""}`}
+      className={`hotness-indicator ${compact ? "compact" : ""}`}
       title={`In ${count} von ${total} veröffentlichten Setlists`}
     >
       <Flame />
@@ -5145,7 +5172,15 @@ function BuilderDialog({
               )}
               {metrics.selected.map((piece, index) => (
                 <div
-                  className={`builder-item ${activePreviewPieceId === piece.id ? "active-preview" : ""}`}
+                  className={`builder-item ${showConsensus && (occurrenceCounts[piece.id] ?? 0) >= 2 ? "frequency-heat" : ""} ${activePreviewPieceId === piece.id ? "active-preview" : ""}`}
+                  style={
+                    showConsensus
+                      ? getFrequencyStyle(
+                          occurrenceCounts[piece.id] ?? 0,
+                          publishedCount,
+                        )
+                      : undefined
+                  }
                   key={piece.id}
                   onClick={(event) => {
                     if (
@@ -5174,7 +5209,11 @@ function BuilderDialog({
                     <span>{piece.composer}</span>
                     <div>
                       {showConsensus && (
-                        <HotnessIndicator count={occurrenceCounts[piece.id] ?? 0} total={publishedCount} compact />
+                        <HotnessIndicator
+                          count={occurrenceCounts[piece.id] ?? 0}
+                          total={publishedCount}
+                          compact
+                        />
                       )}
                       {piece.soloStatus === "available" && (
                         <em className="builder-solo">
@@ -5500,7 +5539,15 @@ function SetlistDialog({
             <div className="builder-items setlist-view-items">
               {metrics.selected.map((piece, index) => (
                 <div
-                  className={`builder-item setlist-view-item ${activePreviewPieceId === piece.id ? "active-preview" : ""}`}
+                  className={`builder-item setlist-view-item ${showConsensus && (occurrenceCounts[piece.id] ?? 0) >= 2 ? "frequency-heat" : ""} ${activePreviewPieceId === piece.id ? "active-preview" : ""}`}
+                  style={
+                    showConsensus
+                      ? getFrequencyStyle(
+                          occurrenceCounts[piece.id] ?? 0,
+                          publishedCount,
+                        )
+                      : undefined
+                  }
                   key={piece.id}
                   onClick={() =>
                     piece.youtubeId && setActivePreviewPieceId(piece.id)
@@ -5525,7 +5572,11 @@ function SetlistDialog({
                     <span>{piece.composer}</span>
                     <div>
                       {showConsensus && (
-                        <HotnessIndicator count={occurrenceCounts[piece.id] ?? 0} total={publishedCount} compact />
+                        <HotnessIndicator
+                          count={occurrenceCounts[piece.id] ?? 0}
+                          total={publishedCount}
+                          compact
+                        />
                       )}
                       {piece.soloStatus === "available" && (
                         <em className="builder-solo">
