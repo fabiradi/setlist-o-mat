@@ -714,19 +714,13 @@ function TimeSignal({
   const state =
     duration < TARGET_MIN ? "short" : duration <= TARGET_MAX ? "good" : "long";
   const delta =
-    state === "short"
-      ? TARGET_MIN - duration
-      : state === "long"
-        ? duration - TARGET_MAX
-        : TARGET_MAX - duration;
+    state === "long" ? duration - TARGET_MAX : TARGET_MAX - duration;
   const label =
-    state === "short"
-      ? `${formatDuration(delta)} fehlen bis 25:00`
-      : state === "long"
-        ? `${formatDuration(delta)} über 30:00`
-        : delta > 0
-          ? `Zielbereich · ${formatDuration(delta)} bis 30:00`
-          : "Zielbereich · Obergrenze erreicht";
+    state === "long"
+      ? `${formatDuration(delta)} Min. zu viel`
+      : delta > 0
+        ? `noch ${formatDuration(delta)} Min.`
+        : "30-Min.-Grenze erreicht";
   const position = Math.min((duration / TIME_SCALE_MAX) * 100, 100);
   return (
     <div
@@ -757,7 +751,7 @@ function TimeSignal({
         />
       </div>
       <div className="time-scale" aria-hidden="true">
-        <span className="time-scale-min">25</span>
+        <span className="time-scale-min">25 Min.</span>
         <span className="time-scale-max">30 Min.</span>
       </div>
     </div>
@@ -1172,7 +1166,8 @@ export default function Home() {
           .eq("project_id", ACTIVE_PROJECT_ID),
         supabase
           .from("setlist_ratings")
-          .select("setlist_id, user_id, stars, comment"),
+          .select("setlist_id, user_id, stars, comment, created_at")
+          .order("created_at", { ascending: true }),
         supabase
           .from("profiles")
           .select("id, email, display_name, is_app_admin, last_seen_at"),
@@ -5769,9 +5764,8 @@ function SetlistDialog({
                             <header>
                               <span className="review-author">
                                 <UserRound />
-                                <strong>
-                                  {isOwnReview ? "Du" : review.author}
-                                </strong>
+                                <strong>{review.author}</strong>
+                                {isOwnReview && <em>(Du)</em>}
                               </span>
                               <DisplayStars value={review.stars} />
                             </header>

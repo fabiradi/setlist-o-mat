@@ -5477,10 +5477,21 @@ small {
   height: 14px;
   color: var(--muted);
 }
-.setlist-review-list article.group-member .display-stars {
+.setlist-review-list .review-author em {
+  border-radius: 99px;
+  padding: 2px 6px;
+  background: var(--yellow-soft);
+  color: #896300;
+  font-size: 9px;
+  font-style: normal;
+  font-weight: 800;
+}
+.setlist-review-list article.group-member .display-stars,
+.setlist-review-list article.group-member .display-stars svg {
   color: #817b86 !important;
 }
-.setlist-review-list article.own .display-stars {
+.setlist-review-list article.own .display-stars,
+.setlist-review-list article.own .display-stars svg {
   color: var(--yellow) !important;
 }
 .setlist-review-list .no-comment {
