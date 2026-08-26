@@ -155,6 +155,12 @@ type YouTubePlayer = {
     index?: number,
     startSeconds?: number,
   ) => void;
+  loadPlaylist: (
+    playlist: string[],
+    index?: number,
+    startSeconds?: number,
+  ) => void;
+  getPlayerState: () => number;
   getPlaylistIndex: () => number;
   destroy: () => void;
 };
@@ -3120,8 +3126,8 @@ export default function Home() {
                       className={`setlist-card state-${setlist.state}`}
                       key={setlist.id}
                     >
-                      <div className="setlist-card-head">
-                        <div>
+                      <div className="setlist-card-title-row">
+                        <span className="setlist-card-icon">
                           {setlist.state === "draft" ? (
                             <Lock />
                           ) : setlist.state === "finalist" ||
@@ -3130,7 +3136,26 @@ export default function Home() {
                           ) : (
                             <ListMusic />
                           )}
-                        </div>
+                        </span>
+                        <h2>
+                          {setlist.state !== "draft" ? (
+                            <a
+                              className="setlist-title-link"
+                              href={`#setlists/${encodeURIComponent(String(setlist.id))}`}
+                            >
+                              {setlist.name}
+                            </a>
+                          ) : isOwnSetlist ? (
+                            <a
+                              className="setlist-title-link"
+                              href={`#setlists/${encodeURIComponent(String(setlist.id))}/bearbeiten`}
+                            >
+                              {setlist.name}
+                            </a>
+                          ) : (
+                            setlist.name
+                          )}
+                        </h2>
                         <span className={`status-pill ${setlist.state}`}>
                           {setlist.state === "draft"
                             ? isOwnSetlist
@@ -3143,28 +3168,17 @@ export default function Home() {
                                 : "Veröffentlicht"}
                         </span>
                       </div>
-                      <h2>
-                        {setlist.state !== "draft" ? (
-                          <button
-                            className="setlist-title-link"
-                            onClick={() => openSetlist(setlist.id)}
-                          >
-                            {setlist.name}
-                          </button>
-                        ) : isOwnSetlist ? (
-                          <button
-                            className="setlist-title-link"
-                            onClick={() => openBuilder(setlist.id)}
-                          >
-                            {setlist.name}
-                          </button>
-                        ) : (
-                          setlist.name
+                      <p className="setlist-card-subline">
+                        <UserRound />
+                        <span>
+                          {isOwnSetlist ? "von dir" : `von ${setlist.owner}`} ·{" "}
+                          {setlist.pieceIds.length} Stücke
+                        </span>
+                        {ownSetlistRating && setlist.state !== "draft" && (
+                          <span className="setlist-self-rated">
+                            <Check /> Von dir bewertet
+                          </span>
                         )}
-                      </h2>
-                      <p>
-                        {isOwnSetlist ? "von dir" : `von ${setlist.owner}`} ·{" "}
-                        {setlist.pieceIds.length} Stücke
                       </p>
                       <TimeSignal duration={metrics.duration} compact />
                       <div className="setlist-piece-preview">
@@ -4897,28 +4911,31 @@ function SetlistPlayer({
   const playerHostRef = useRef<HTMLDivElement>(null);
   const playerRef = useRef<YouTubePlayer | null>(null);
   const activePieceIdRef = useRef<number | null>(activePieceId);
-  const skipNextPropCueRef = useRef(false);
+  const apiHandledPieceIdRef = useRef<number | null>(null);
   const [apiFailed, setApiFailed] = useState(false);
 
   const reportActivePiece = (pieceId: number, alreadyHandled = false) => {
-    skipNextPropCueRef.current = alreadyHandled;
+    if (activePieceIdRef.current === pieceId) return;
+    if (alreadyHandled) apiHandledPieceIdRef.current = pieceId;
     activePieceIdRef.current = pieceId;
     onActivePieceChange(pieceId);
   };
 
   useEffect(() => {
     activePieceIdRef.current = activePieceId;
-    if (skipNextPropCueRef.current) {
-      skipNextPropCueRef.current = false;
+    if (apiHandledPieceIdRef.current === activePieceId) {
+      apiHandledPieceIdRef.current = null;
       return;
     }
+    apiHandledPieceIdRef.current = null;
     const index = playable.findIndex((piece) => piece.id === activePieceId);
-    if (index >= 0)
-      playerRef.current?.cuePlaylist(
-        playable.map((piece) => piece.youtubeId),
-        index,
-        0,
-      );
+    const player = playerRef.current;
+    if (index >= 0 && player) {
+      const playlist = playable.map((piece) => piece.youtubeId);
+      const isPlaying = [1, 3].includes(player.getPlayerState());
+      if (isPlaying) player.loadPlaylist(playlist, index, 0);
+      else player.cuePlaylist(playlist, index, 0);
+    }
     // Die Playlist-Signatur ersetzt das abgeleitete Array als stabile Abhängigkeit.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activePieceId, playlistKey]);

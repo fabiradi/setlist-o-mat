@@ -497,6 +497,60 @@ small {
   border-radius: 7px;
 }
 .builder-item.active-preview { background: var(--coral-soft) !important; }
+
+/* Ruhiger, semantischer Kopf der Setlist-Card */
+.setlist-card-title-row {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 9px;
+}
+.setlist-card-icon {
+  width: 30px;
+  height: 30px;
+  border-radius: 9px;
+  display: grid;
+  place-items: center;
+  color: var(--purple);
+  background: var(--purple-soft);
+}
+.setlist-card-icon svg { width: 16px; height: 16px; }
+.state-draft .setlist-card-icon { color: #736a7d; background: #ece8ef; }
+.state-finalist .setlist-card-icon,
+.state-final .setlist-card-icon { color: #936b00; background: var(--yellow-soft); }
+.setlist-card-title-row h2 { min-width: 0; margin: 0; font-size: 20px; }
+.setlist-card-title-row .status-pill.published {
+  padding: 3px 6px;
+  color: #587065;
+  background: #edf4f0;
+  font-size: 8px;
+  letter-spacing: .05em;
+}
+.setlist-title-link { display: inline; color: inherit; }
+.setlist-card-subline {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 5px;
+  margin-top: 7px !important;
+}
+.setlist-card-subline > svg { width: 13px; height: 13px; }
+.setlist-self-rated {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  color: #876200;
+  font-weight: 750;
+}
+.setlist-self-rated:before { content: "·"; margin-right: 2px; color: var(--muted); }
+.setlist-self-rated svg { width: 12px; height: 12px; }
+.discussion-comments p,
+.setlist-comments .discussion-comments p { white-space: pre-wrap; }
+
+@media (max-width: 460px) {
+  .setlist-card-title-row { grid-template-columns: auto minmax(0, 1fr); }
+  .setlist-card-title-row .status-pill { grid-column: 2; justify-self: start; }
+}
 .builder-item.active-preview { background: #fff4ee; }
 
 /* Kompakte Häufigkeit und Setlist-Bewertungen */
