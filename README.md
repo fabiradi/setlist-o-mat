@@ -4,13 +4,16 @@
 
 Der Setlist-o-Mat hilft einer Gruppe dabei, Konzertstücke zu bewerten, Setlist-Entwürfe zusammenzustellen und gemeinsam eine finale Reihenfolge zu finden.
 
+Die verbindliche Übersicht über Produktregeln, Architektur, Datenmodell, aktuellen Funktionsumfang und größere offene Themen steht in [docs/PROJECT_CONTEXT.md](docs/PROJECT_CONTEXT.md). Repository-spezifische Arbeitsregeln für Coding-Assistenten stehen in [AGENTS.md](AGENTS.md).
+
 ## Funktionen
 
 - Stücke mit 1–5 Sternen und Kommentar bewerten
 - offene Bewertungen als persönliche Aufgabenliste anzeigen
 - beliebig viele Setlists erstellen, sortieren, duplizieren und veröffentlichen
-- Dauer, Zielkorridor von 25–30 Minuten, Grade, Kosten und Genre-Mix auswerten
+- Dauer, projektspezifischen Zielkorridor, Grade, Kosten und Genre-Mix auswerten
 - veröffentlichte Setlists gemeinsam bewerten und kommentieren
+- Projekte und Projektmitgliedschaften administrieren
 - Metadaten und Auswahlstatus administrieren
 - mobil optimierte Bedienung
 
@@ -29,7 +32,7 @@ Ohne Supabase-Variablen läuft die App mit Demodaten. Die vollständige Backend-
 
 Der Workflow `.github/workflows/pages.yml` erzeugt bei jedem Push auf `main` einen statischen Next.js-Build und veröffentlicht ihn über GitHub Pages.
 
-Für die spätere Supabase-Verbindung werden diese Repository-Variablen verwendet:
+Für die Supabase-Verbindung werden diese Repository-Variablen verwendet:
 
 ```text
 NEXT_PUBLIC_SUPABASE_URL
