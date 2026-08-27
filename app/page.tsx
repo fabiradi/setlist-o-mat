@@ -3807,7 +3807,12 @@ export default function Home() {
                           {setlist.state !== "draft" ? (
                             <a
                               className="setlist-title-link"
-                              href={`#setlists/${encodeURIComponent(String(setlist.id))}`}
+                              href={`#${setlistDetailHash(
+                                setlist.id,
+                                setlistFilter,
+                                setlistSort,
+                                onlyUnratedSetlists,
+                              )}`}
                             >
                               {setlist.name}
                             </a>
