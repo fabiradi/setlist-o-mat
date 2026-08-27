@@ -615,6 +615,17 @@ function setlistsHash(
   if (onlyUnrated) params.set("unbewertet", "1");
   return `setlists${params.size ? `?${params}` : ""}`;
 }
+function setlistDetailHash(
+  setlistId: number | string,
+  filter: SetlistFilter,
+  sort: SetlistSort = "rating-desc",
+  onlyUnrated = false,
+) {
+  return setlistsHash(filter, sort, onlyUnrated).replace(
+    "setlists",
+    `setlists/${encodeURIComponent(String(setlistId))}`,
+  );
+}
 function getMissingPieceFields(piece: Piece) {
   return [
     !piece.title.trim() && "Titel",
@@ -1762,11 +1773,19 @@ export default function Home() {
     writeAppHash(piecesHash(search, genre, onlyOpen, pieceSort), true);
   };
   const openSetlist = (setlistId: number | string) => {
+    const preserveFilters = view === "setlists";
     setView("setlists");
     setActiveSetlistId(setlistId);
     setActivePieceId(null);
     setBuilderId(null);
-    writeAppHash(`setlists/${encodeURIComponent(String(setlistId))}`);
+    writeAppHash(
+      setlistDetailHash(
+        setlistId,
+        preserveFilters ? setlistFilter : "all",
+        preserveFilters ? setlistSort : "rating-desc",
+        preserveFilters && onlyUnratedSetlists,
+      ),
+    );
   };
   const closeSetlist = () => {
     setActiveSetlistId(null);
